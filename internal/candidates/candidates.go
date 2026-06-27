@@ -46,6 +46,7 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
+// cacheStale checks 2 levels below each root (matching rebuildCache scan depth).
 func cacheStale(roots []string, cacheFile string) bool {
 	info, err := os.Stat(cacheFile)
 	if err != nil {
@@ -85,6 +86,7 @@ func cacheStale(roots []string, cacheFile string) bool {
 	return false
 }
 
+// rebuildCache scans 2 levels below each root (matching cacheStale scan depth).
 func rebuildCache(roots []string, cacheFile string) ([]Candidate, error) {
 	var cands []Candidate
 
