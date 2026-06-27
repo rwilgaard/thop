@@ -74,10 +74,14 @@ func main() {
 		scores    map[string]float64
 		wg        sync.WaitGroup
 	)
+	var (
+		candidatesErr error
+		frecencyErr   error
+	)
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		static, _ = candidates.LoadCandidates(cfg.Paths, cacheFile)
+		static, candidatesErr = candidates.LoadCandidates(cfg.Paths, cacheFile)
 	}()
 	go func() {
 		defer wg.Done()
@@ -85,12 +89,19 @@ func main() {
 	}()
 	go func() {
 		defer wg.Done()
-		scores, _ = frecency.Load(frecencyFile)
+		scores, frecencyErr = frecency.Load(frecencyFile)
 		if scores == nil {
 			scores = map[string]float64{}
 		}
 	}()
 	wg.Wait()
+
+	if candidatesErr != nil {
+		fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", candidatesErr)
+	}
+	if frecencyErr != nil {
+		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
+	}
 
 	chosen, err := ui.Run(static, scores, tmuxState, *switchOnly, cfg)
 	if err != nil {
