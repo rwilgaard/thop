@@ -1,0 +1,109 @@
+package frecency
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type entry struct {
+	visits int64
+	lastTs int64
+}
+
+func recencyWeight(lastTs int64) float64 {
+	age := time.Now().Unix() - lastTs
+	switch {
+	case age < 3600:   return 4.0  // < 1 hour
+	case age < 86400:  return 2.0  // < 1 day
+	case age < 604800: return 1.0  // < 1 week
+	case age < 2592000: return 0.5 // < 30 days
+	default:           return 0.25
+	}
+}
+
+// Load reads the history file and returns a frecency score per path.
+// Score = visits * recencyWeight(lastAccess). Higher = more frequent and recent.
+func Load(file string) (map[string]float64, error) {
+	entries, err := readEntries(file)
+	if err != nil {
+		return nil, err
+	}
+	scores := make(map[string]float64, len(entries))
+	for path, e := range entries {
+		scores[path] = float64(e.visits) * recencyWeight(e.lastTs)
+	}
+	return scores, nil
+}
+
+// Record increments the visit count and updates the last-access timestamp for relPath.
+func Record(file, relPath string) error {
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	entries, err := readEntries(file)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if entries == nil {
+		entries = map[string]entry{}
+	}
+	e := entries[relPath]
+	e.visits++
+	e.lastTs = time.Now().Unix()
+	entries[relPath] = e
+	return writeEntries(file, entries)
+}
+
+func readEntries(file string) (map[string]entry, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	entries := map[string]entry{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		p := strings.SplitN(sc.Text(), "\t", 3)
+		if len(p) != 3 {
+			continue
+		}
+		visits, err := strconv.ParseInt(p[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		lastTs, err := strconv.ParseInt(p[2], 10, 64)
+		if err != nil {
+			continue
+		}
+		entries[p[0]] = entry{visits: visits, lastTs: lastTs}
+	}
+	return entries, sc.Err()
+}
+
+func writeEntries(file string, entries map[string]entry) error {
+	tmp, err := os.CreateTemp(filepath.Dir(file), "frecency-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+
+	w := bufio.NewWriter(tmp)
+	for path, e := range entries {
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\n", path, e.visits, e.lastTs)
+	}
+	if err := w.Flush(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, file)
+}

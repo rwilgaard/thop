@@ -1,0 +1,150 @@
+package tmux
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// TmuxState holds the set of active session and window names.
+type TmuxState struct {
+	Sessions map[string]bool // session name → exists
+	Windows  map[string]bool // "session/window" → exists
+}
+
+// LoadState queries tmux for all active sessions and windows.
+func LoadState() TmuxState {
+	ts := TmuxState{
+		Sessions: map[string]bool{},
+		Windows:  map[string]bool{},
+	}
+	out, err := tmuxOutput("list-windows", "-a", "-F", "#{session_name}/#{window_name}")
+	if err != nil {
+		return ts
+	}
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		entry := sc.Text()
+		if entry == "" {
+			continue
+		}
+		ts.Windows[entry] = true
+		if session, _, ok := strings.Cut(entry, "/"); ok {
+			ts.Sessions[session] = true
+		}
+	}
+	return ts
+}
+
+// HandleSelection creates or switches to the appropriate tmux session for the given path.
+// root is the Candidate.Root for the selected path: a direct child of root gets a flat
+// session (no window), a nested path gets a window within its parent's session.
+func HandleSelection(selected, root string) error {
+	var projectDir string
+	var isRepo bool
+
+	if root != "" && filepath.Dir(selected) == root {
+		projectDir = selected
+		isRepo = false
+	} else {
+		projectDir = filepath.Dir(selected)
+		isRepo = true
+	}
+
+	sessionName := sessionize(filepath.Base(projectDir))
+
+	if !hasSession(sessionName) {
+		// Create session with projectDir as root so user-created windows inherit it.
+		if err := newSession(sessionName, projectDir, ""); err != nil {
+			return fmt.Errorf("new session: %w", err)
+		}
+		if isRepo {
+			// Add repo window, then kill the initial window so only the repo window remains.
+			windowName := filepath.Base(selected)
+			if err := tmuxRun("new-window", "-a", "-t", sessionName+":{end}", "-n", windowName, "-c", selected); err != nil {
+				return fmt.Errorf("open window: %w", err)
+			}
+			_ = tmuxRun("kill-window", "-t", sessionName+":^")
+		}
+		hydrate(sessionName, projectDir)
+		return switchTo(sessionName)
+	}
+
+	if isRepo {
+		if err := openRepoWindow(sessionName, selected); err != nil {
+			return fmt.Errorf("open window: %w", err)
+		}
+	}
+
+	return switchTo(sessionName)
+}
+
+func sessionize(name string) string {
+	return strings.ReplaceAll(name, ".", "_")
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func hasSession(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+}
+
+func newSession(session, startDir, windowName string) error {
+	args := []string{"new-session", "-ds", session, "-c", startDir}
+	if windowName != "" {
+		args = append(args, "-n", windowName)
+	}
+	return tmuxRun(args...)
+}
+
+func openRepoWindow(session, repoPath string) error {
+	windowName := filepath.Base(repoPath)
+	// Use "=name" prefix for exact-match to avoid tmux parsing dots as window.pane.
+	if err := tmuxRun("select-window", "-t", session+":="+windowName); err != nil {
+		return tmuxRun("new-window", "-a", "-t", session+":{end}", "-n", windowName, "-c", repoPath)
+	}
+	return nil
+}
+
+func hydrate(session, projectDir string) {
+	home, _ := os.UserHomeDir()
+	local := filepath.Join(projectDir, ".thop")
+	global := filepath.Join(home, ".thop")
+
+	var src string
+	switch {
+	case pathExists(local):
+		src = local
+	case pathExists(global):
+		src = global
+	}
+	if src != "" {
+		_ = tmuxRun("send-keys", "-t", session, "source "+shellQuote(src), "Enter")
+	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func switchTo(session string) error {
+	if os.Getenv("TMUX") == "" {
+		return tmuxRun("attach-session", "-t", session)
+	}
+	return tmuxRun("switch-client", "-t", session)
+}
+
+func tmuxRun(args ...string) error {
+	return exec.Command("tmux", args...).Run()
+}
+
+func tmuxOutput(args ...string) ([]byte, error) {
+	return exec.Command("tmux", args...).Output()
+}
