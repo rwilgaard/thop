@@ -16,12 +16,20 @@ import (
 	"github.com/rwilgaard/thop/internal/ui"
 )
 
+var version = "dev"
+
 func main() {
 	var (
-		switchOnly = flag.Bool("s", false, "only show active sessions")
-		popup      = flag.Bool("popup", false, "")
+		switchOnly  = flag.Bool("s", false, "only show active sessions")
+		popup       = flag.Bool("popup", false, "")
+		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
