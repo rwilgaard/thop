@@ -14,6 +14,8 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
+const activeLabel = "● open"
+
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // ── Scoring ──────────────────────────────────────────────────────────────────
@@ -324,10 +326,10 @@ func (m model) View() string {
 			plain := ansiEscape.ReplaceAllString(item.base.display, "")
 			plainW := lipgloss.Width(plain)
 			if item.base.active {
-				activeW := lipgloss.Width("● open")
-				pad := max(1, width-1-plainW-activeW-3)
+				activeW := lipgloss.Width(activeLabel)
+				pad := max(1, width-1-plainW-activeW-1)
 				sb.WriteString(styleSelected.Render(" " + plain + strings.Repeat(" ", pad)))
-				sb.WriteString(styleSelectedActive.Render(" ● open "))
+				sb.WriteString(styleSelectedActive.Render(activeLabel))
 				sb.WriteByte('\n')
 			} else {
 				pad := max(1, width-1-plainW-1)
@@ -338,7 +340,7 @@ func (m model) View() string {
 			sb.WriteByte(' ')
 			sb.WriteString(item.base.display)
 			if item.base.active {
-				activeStr := styleDimActive.Render("● open")
+				activeStr := styleDimActive.Render(activeLabel)
 				displayW := lipgloss.Width(item.base.display)
 				activeW := lipgloss.Width(activeStr)
 				pad := max(1, width-1-displayW-activeW-1)
