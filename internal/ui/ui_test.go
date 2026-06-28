@@ -219,7 +219,7 @@ func TestView(t *testing.T) {
 	m.height = 24
 	m.ready = true
 
-	out := m.View()
+	out := m.View().Content
 
 	checks := []struct {
 		want string
