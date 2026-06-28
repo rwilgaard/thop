@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/charmbracelet/lipgloss/v2 v2.0.4
 	github.com/sahilm/fuzzy v0.1.3
 	gopkg.in/yaml.v3 v3.0.1
 )
