@@ -6,15 +6,16 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/tmux"
 	"github.com/sahilm/fuzzy"
 )
 
-const activeLabel = "● open"
+const activeLabel = "● open "
+const leftPad = " "
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
@@ -225,28 +226,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.ready = true
 
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
 			return m, tea.Quit
 
-		case tea.KeyEnter:
+		case "enter":
 			if len(m.filtered) > 0 {
 				m.chosen = m.filtered[m.cursor].base.candidate
 			}
 			return m, tea.Quit
 
-		case tea.KeyUp, tea.KeyCtrlK:
+		case "up", "ctrl+k":
 			if m.cursor > 0 {
 				m.cursor--
 			}
 
-		case tea.KeyDown, tea.KeyCtrlJ:
+		case "down", "ctrl+j":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 			}
 
-		case tea.KeyBackspace, tea.KeyCtrlH:
+		case "backspace", "ctrl+h":
 			if len(m.query) > 0 {
 				runes := []rune(m.query)
 				m.query = string(runes[:len(runes)-1])
@@ -254,33 +255,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildFiltered()
 			}
 
-		case tea.KeyCtrlA:
+		case "ctrl+a":
 			m.view = viewAll
 			m.cursor = 0
 			m.rebuildFiltered()
 
-		case tea.KeyCtrlP:
+		case "ctrl+p":
 			m.view = viewProject
 			m.cursor = 0
 			m.rebuildFiltered()
 
-		case tea.KeyCtrlR:
+		case "ctrl+r":
 			m.view = viewRepo
 			m.cursor = 0
 			m.rebuildFiltered()
 
-		case tea.KeyRunes:
-			m.query += string(msg.Runes)
-			m.cursor = 0
-			m.rebuildFiltered()
+		default:
+			if t := msg.Key().Text; t != "" {
+				m.query += t
+				m.cursor = 0
+				m.rebuildFiltered()
+			}
 		}
 	}
 	return m, nil
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
 	if !m.ready {
-		return ""
+		return tea.NewView("")
 	}
 	width := m.width
 	if width == 0 {
@@ -291,22 +294,25 @@ func (m model) View() string {
 		height = 24
 	}
 
-	sep := strings.Repeat("─", width-1)
+	sep := strings.Repeat("─", width-2)
 
 	var sb strings.Builder
 
 	// Search row: ❯ query█                  ctrl-a · ctrl-p · ctrl-r
 	hints := styleSep.Render("ctrl-a · ctrl-p · ctrl-r")
-	promptStr := stylePrompt.Render("❯ ") + m.query + "█"
-	promptW := lipgloss.Width(stylePrompt.Render("❯ ")) + len([]rune(m.query)) + 1 // + "█"
+	renderedPrompt := stylePrompt.Render("❯ ")
+	promptStr := renderedPrompt + m.query + "█"
+	promptW := lipgloss.Width(renderedPrompt) + len([]rune(m.query)) + 1 // + "█"
 	hintsW := lipgloss.Width(hints)
-	searchPad := max(1, width-promptW-hintsW-1)
+	searchPad := max(1, width-2-promptW-hintsW)
+	sb.WriteString(leftPad)
 	sb.WriteString(promptStr)
 	sb.WriteString(strings.Repeat(" ", searchPad))
 	sb.WriteString(hints)
 	sb.WriteByte('\n')
 
 	// Top separator
+	sb.WriteString(leftPad)
 	sb.WriteString(styleSep.Render(sep))
 	sb.WriteByte('\n')
 
@@ -327,23 +333,23 @@ func (m model) View() string {
 			plainW := lipgloss.Width(plain)
 			if item.base.active {
 				activeW := lipgloss.Width(activeLabel)
-				pad := max(1, width-1-plainW-activeW-1)
-				sb.WriteString(styleSelected.Render(" " + plain + strings.Repeat(" ", pad)))
+				pad := max(1, width-1-plainW-activeW)
+				sb.WriteString(styleSelected.Render(leftPad + plain + strings.Repeat(" ", pad)))
 				sb.WriteString(styleSelectedActive.Render(activeLabel))
 				sb.WriteByte('\n')
 			} else {
 				pad := max(1, width-1-plainW-1)
-				sb.WriteString(styleSelected.Render(" " + plain + strings.Repeat(" ", pad) + " "))
+				sb.WriteString(styleSelected.Render(leftPad + plain + strings.Repeat(" ", pad) + " "))
 				sb.WriteByte('\n')
 			}
 		} else {
-			sb.WriteByte(' ')
+			sb.WriteString(leftPad)
 			sb.WriteString(item.base.display)
 			if item.base.active {
 				activeStr := styleDimActive.Render(activeLabel)
 				displayW := lipgloss.Width(item.base.display)
 				activeW := lipgloss.Width(activeStr)
-				pad := max(1, width-1-displayW-activeW-1)
+				pad := max(1, width-1-displayW-activeW)
 				sb.WriteString(strings.Repeat(" ", pad))
 				sb.WriteString(activeStr)
 			}
@@ -358,6 +364,7 @@ func (m model) View() string {
 	}
 
 	// Bottom separator
+	sb.WriteString(leftPad)
 	sb.WriteString(styleSep.Render(sep))
 	sb.WriteByte('\n')
 
@@ -389,12 +396,12 @@ func (m model) View() string {
 	statusPad := max(1, width-1-statusLeftW-countW-1)
 	// No trailing newline — the last line must not advance the cursor to the next
 	// row or the terminal scrolls, pushing the search bar (row 0) off screen.
-	sb.WriteByte(' ')
+	sb.WriteString(leftPad)
 	sb.WriteString(statusLeft)
 	sb.WriteString(strings.Repeat(" ", statusPad))
 	sb.WriteString(count)
 
-	return sb.String()
+	return tea.NewView(sb.String())
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
