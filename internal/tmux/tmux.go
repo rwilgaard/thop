@@ -136,7 +136,11 @@ func shellQuote(s string) string {
 
 func switchTo(session string) error {
 	if os.Getenv("TMUX") == "" {
-		return tmuxRun("attach-session", "-t", session)
+		cmd := exec.Command("tmux", "attach-session", "-t", session)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
 	}
 	return tmuxRun("switch-client", "-t", session)
 }
