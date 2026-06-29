@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/rwilgaard/thop/internal/candidates"
@@ -43,7 +44,7 @@ func main() {
 	cacheFile := xdgCache + "/thop/candidates"
 	cfg := config.Load(xdgConfig, home)
 	if len(cfg.Paths) == 0 {
-		fatalf("no paths configured — edit %s/thop/config.yaml", xdgConfig)
+		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
 	}
 
 	// Direct argument: skip UI entirely.
