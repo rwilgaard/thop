@@ -13,6 +13,7 @@ import (
 	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/frecency"
+	"github.com/rwilgaard/thop/internal/git"
 	"github.com/rwilgaard/thop/internal/tmux"
 	"github.com/rwilgaard/thop/internal/ui"
 )
@@ -43,8 +44,48 @@ func main() {
 	frecencyFile := xdgData + "/thop/history"
 	cacheFile := xdgCache + "/thop/candidates"
 	cfg := config.Load(xdgConfig, home)
+
 	if len(cfg.Paths) == 0 {
 		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
+	}
+
+	// Guard against clone with wrong argument count
+	if flag.NArg() >= 1 && flag.Arg(0) == "clone" && flag.NArg() != 2 {
+		fatalf("usage: thop clone <url>")
+	}
+
+	// Subcommand: thop clone <url>
+	if flag.NArg() == 2 && flag.Arg(0) == "clone" {
+		url := flag.Arg(1)
+		if os.Getenv("TMUX") != "" && !*popup {
+			args := append([]string{"display-popup", "-E", "-w", "60%", "-h", "50%", os.Args[0], "--popup"}, os.Args[1:]...)
+			// display-popup -E forwards the inner command's exit status to the outer
+			// tmux process, so a non-zero ExitError here means the inner binary ran
+			// and failed (e.g. handleSelection errored). Propagate that exit code
+			// rather than relaunching the TUI. A non-ExitError means popup creation
+			// itself failed (unsupported tmux version, etc.) — fall through instead.
+			if err := exec.Command("tmux", args...).Run(); err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					os.Exit(exitErr.ExitCode())
+				}
+			} else {
+				return
+			}
+		}
+		static, loadErr := candidates.LoadCandidates(cfg.Paths, cacheFile)
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", loadErr)
+		}
+		dest, err := ui.RunDestPicker(static, cfg)
+		if err != nil {
+			fatalf("dest picker: %v", err)
+		}
+		if dest == "" {
+			return
+		}
+		doClone(url, dest, frecencyFile)
+		return
 	}
 
 	// Direct argument: skip UI entirely.
@@ -112,20 +153,34 @@ func main() {
 		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
 	}
 
-	chosen, err := ui.Run(static, scores, tmuxState, *switchOnly, cfg)
+	result, err := ui.Run(static, scores, tmuxState, *switchOnly, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "thop:", err)
 		return
 	}
-	if chosen.AbsPath == "" {
-		return
-	}
 
-	if err := frecency.Record(frecencyFile, chosen.AbsPath); err != nil {
+	switch {
+	case result.Clone != nil:
+		doClone(result.Clone.URL, result.Clone.Dest, frecencyFile)
+	case result.Candidate.AbsPath != "":
+		if err := frecency.Record(frecencyFile, result.Candidate.AbsPath); err != nil {
+			fmt.Fprintln(os.Stderr, "frecency:", err)
+		}
+		if err := tmux.HandleSelection(result.Candidate.AbsPath, result.Candidate.Root); err != nil {
+			fatalf("%v", err)
+		}
+	}
+}
+
+func doClone(url, destPath, frecencyFile string) {
+	cloned, err := git.Clone(url, destPath)
+	if err != nil {
+		fatalf("clone: %v", err)
+	}
+	if err := frecency.Record(frecencyFile, cloned); err != nil {
 		fmt.Fprintln(os.Stderr, "frecency:", err)
 	}
-
-	if err := tmux.HandleSelection(chosen.AbsPath, chosen.Root); err != nil {
+	if err := tmux.HandleSelection(cloned, ""); err != nil {
 		fatalf("%v", err)
 	}
 }

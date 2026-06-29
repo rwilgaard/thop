@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	cand "github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/tmux"
 )
@@ -226,7 +229,8 @@ func TestView(t *testing.T) {
 		desc string
 	}{
 		{"❯", "prompt glyph"},
-		{"ctrl-a", "view hints"},
+		{"<ctrl-g> Clone", "clone hint"},
+		{"<ctrl-a> All", "view hints"},
 		{"golang/foo", "first item"},
 		{"work", "second item"},
 		{"● open", "active indicator"},
@@ -237,5 +241,110 @@ func TestView(t *testing.T) {
 		if !strings.Contains(out, c.want) {
 			t.Errorf("View() missing %s: %q not found", c.desc, c.want)
 		}
+	}
+}
+
+func TestUpdateURLInput(t *testing.T) {
+	m := model{inputMode: modeURLInput, normFrec: map[string]float64{}}
+
+	// Type characters
+	for _, ch := range []string{"h", "t", "t", "p"} {
+		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
+		updated, _ := m.Update(msg)
+		m = updated.(model)
+	}
+	if m.urlInput != "http" {
+		t.Errorf("urlInput = %q, want %q", m.urlInput, "http")
+	}
+
+	// Backspace
+	bsp := tea.KeyPressMsg{Code: tea.KeyBackspace}
+	updated, _ := m.Update(bsp)
+	m = updated.(model)
+	if m.urlInput != "htt" {
+		t.Errorf("after backspace urlInput = %q, want %q", m.urlInput, "htt")
+	}
+
+	// Esc cancels
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	updated, _ = m.Update(esc)
+	m = updated.(model)
+	if m.inputMode != modeNormal {
+		t.Errorf("esc should return to modeNormal, got %v", m.inputMode)
+	}
+	if m.urlInput != "" {
+		t.Errorf("esc should clear urlInput, got %q", m.urlInput)
+	}
+
+	// Enter with non-empty URL advances to modeDestPicker
+	m2 := model{inputMode: modeURLInput, normFrec: map[string]float64{}}
+	for _, ch := range []string{"h", "t", "t", "p"} {
+		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
+		updated2, _ := m2.Update(msg)
+		m2 = updated2.(model)
+	}
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	updated2, _ := m2.Update(enter)
+	m2 = updated2.(model)
+	if m2.inputMode != modeDestPicker {
+		t.Errorf("enter should advance to modeDestPicker, got %v", m2.inputMode)
+	}
+}
+
+func TestUpdateDestPicker_conflict(t *testing.T) {
+	// Create a candidate dir and pre-create the expected repo subdir to trigger conflict.
+	parentDir := t.TempDir()
+	conflictDir := filepath.Join(parentDir, "myrepo")
+	if err := os.MkdirAll(conflictDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cs := []cand.Candidate{
+		{AbsPath: parentDir, Root: filepath.Dir(parentDir), RelPath: filepath.Base(parentDir), IsRepo: false},
+	}
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false)
+	m.inputMode = modeDestPicker
+	m.urlInput = "https://github.com/user/myrepo"
+	m.rebuildDestFiltered()
+
+	// Select the candidate and press enter — should detect conflict.
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	updated, _ := m.Update(enter)
+	m = updated.(model)
+	if m.inputMode != modeCloneName {
+		t.Errorf("conflict should advance to modeCloneName, got %v", m.inputMode)
+	}
+	if m.cloneNameInput != "myrepo" {
+		t.Errorf("cloneNameInput = %q, want %q", m.cloneNameInput, "myrepo")
+	}
+
+	// Type a new name and confirm.
+	for _, ch := range []string{"2"} {
+		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
+		updated2, _ := m.Update(msg)
+		m = updated2.(model)
+	}
+	enter2 := tea.KeyPressMsg{Code: tea.KeyEnter}
+	updated3, _ := m.Update(enter2)
+	m = updated3.(model)
+	if m.result.Clone == nil {
+		t.Fatal("result.Clone should be set after confirming name")
+	}
+	wantDest := filepath.Join(parentDir, "myrepo2")
+	if m.result.Clone.Dest != wantDest {
+		t.Errorf("Dest = %q, want %q", m.result.Clone.Dest, wantDest)
+	}
+}
+
+func TestUpdateCloneName_esc(t *testing.T) {
+	m := model{
+		inputMode:      modeCloneName,
+		cloneNameInput: "myrepo",
+		normFrec:       map[string]float64{},
+	}
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	updated, _ := m.Update(esc)
+	m = updated.(model)
+	if m.inputMode != modeDestPicker {
+		t.Errorf("esc should return to modeDestPicker, got %v", m.inputMode)
 	}
 }
