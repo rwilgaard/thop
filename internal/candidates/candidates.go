@@ -14,7 +14,7 @@ const (
 	colorRepo    = "\033[32m"
 	colorActive  = "\033[33m"
 	iconProject  = "󰉋"
-	iconRepo     = ""
+	iconRepo     = ""
 )
 
 // Candidate is a project directory or git repository openable as a tmux session.
