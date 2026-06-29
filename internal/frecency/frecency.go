@@ -46,11 +46,8 @@ func Record(file, relPath string) error {
 		return err
 	}
 	entries, err := readEntries(file)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
 		return err
-	}
-	if entries == nil {
-		entries = map[string]entry{}
 	}
 	e := entries[relPath]
 	e.visits++
@@ -62,6 +59,9 @@ func Record(file, relPath string) error {
 func readEntries(file string) (map[string]entry, error) {
 	f, err := os.Open(file)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]entry{}, nil
+		}
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
