@@ -31,6 +31,9 @@ func recencyWeight(lastTs int64) float64 {
 func Load(file string) (map[string]float64, error) {
 	entries, err := readEntries(file)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]float64{}, nil
+		}
 		return nil, err
 	}
 	scores := make(map[string]float64, len(entries))
