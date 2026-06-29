@@ -183,7 +183,6 @@ func readCache(cacheFile string, roots []string) ([]Candidate, error) {
 
 	sc := bufio.NewScanner(f)
 
-	// Validate header: first line must be "#root1\troot2\t..."
 	if !sc.Scan() {
 		return nil, fmt.Errorf("empty cache")
 	}

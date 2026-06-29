@@ -63,7 +63,7 @@ func HandleSelection(selected, root string) error {
 			return fmt.Errorf("new session: %w", err)
 		}
 		if isRepo {
-			// Add repo window, then kill the initial window so only the repo window remains.
+			// kill the initial window so only the repo window remains.
 			windowName := filepath.Base(selected)
 			if err := tmuxRun("new-window", "-a", "-t", sessionName+":{end}", "-n", windowName, "-c", selected); err != nil {
 				return fmt.Errorf("open window: %w", err)

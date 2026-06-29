@@ -49,12 +49,10 @@ func main() {
 		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
 	}
 
-	// Guard against clone with wrong argument count
 	if flag.NArg() >= 1 && flag.Arg(0) == "clone" && flag.NArg() != 2 {
 		fatalf("usage: thop clone <url>")
 	}
 
-	// Subcommand: thop clone <url>
 	if flag.NArg() == 2 && flag.Arg(0) == "clone" {
 		url := flag.Arg(1)
 		if os.Getenv("TMUX") != "" && !*popup {
@@ -117,7 +115,6 @@ func main() {
 		}
 	}
 
-	// Concurrent load: static candidate cache, live tmux state, frecency scores.
 	var (
 		static    []candidates.Candidate
 		tmuxState tmux.TmuxState
@@ -188,7 +185,6 @@ func doClone(url, destPath, frecencyFile string) {
 // guessRoot returns the Candidate.Root for a directly-specified absolute path.
 // If arg is a direct child of a configured path, that path is the root.
 // If arg itself is a configured path (direct candidate), its parent dir is the root.
-// Returns empty string if no match; HandleSelection treats that as a nested repo.
 func guessRoot(arg string, paths []string) string {
 	parent := filepath.Dir(arg)
 	for _, p := range paths {
