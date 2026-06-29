@@ -233,14 +233,14 @@ func CandidateActive(c Candidate, sessions, windows map[string]bool) bool {
 }
 
 // FormatDisplay returns an ANSI-colored display string for a candidate row.
-func FormatDisplay(relPath string, isRepo, active bool) string {
+func FormatDisplay(c Candidate, active bool) string {
 	icon, color := iconProject, colorProject
-	if isRepo {
+	if c.IsRepo {
 		icon, color = iconRepo, colorRepo
 	}
 	indicator := ""
 	if active {
 		indicator = colorActive + " ●" + colorReset
 	}
-	return color + icon + colorReset + " " + relPath + indicator
+	return color + icon + colorReset + " " + c.RelPath + indicator
 }

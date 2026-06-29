@@ -72,21 +72,20 @@ func TestCandidateActive(t *testing.T) {
 func TestFormatDisplay(t *testing.T) {
 	tests := []struct {
 		name      string
-		relPath   string
-		isRepo    bool
+		c         Candidate
 		active    bool
 		wantColor string
 		wantDot   bool
 	}{
-		{"project inactive", "myproject", false, false, colorProject, false},
-		{"repo inactive", "myrepo", true, false, colorRepo, false},
-		{"project active", "myproject", false, true, colorProject, true},
-		{"repo active", "myrepo", true, true, colorRepo, true},
+		{"project inactive", Candidate{RelPath: "myproject", IsRepo: false}, false, colorProject, false},
+		{"repo inactive", Candidate{RelPath: "myrepo", IsRepo: true}, false, colorRepo, false},
+		{"project active", Candidate{RelPath: "myproject", IsRepo: false}, true, colorProject, true},
+		{"repo active", Candidate{RelPath: "myrepo", IsRepo: true}, true, colorRepo, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := FormatDisplay(tt.relPath, tt.isRepo, tt.active)
-			if !strings.Contains(out, tt.relPath) {
+			out := FormatDisplay(tt.c, tt.active)
+			if !strings.Contains(out, tt.c.RelPath) {
 				t.Errorf("output missing name: %q", out)
 			}
 			if !strings.Contains(out, tt.wantColor) {
