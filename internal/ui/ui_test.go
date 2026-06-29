@@ -85,10 +85,8 @@ func TestCombineScore(t *testing.T) {
 
 func TestRebuildFiltered(t *testing.T) {
 	makeModel := func(items []baseItem, frecency map[string]float64) model {
-		m := model{
-			all:      items,
-			normFrec: normalizeScores(frecency),
-		}
+		m := newModel(nil, frecency, tmux.TmuxState{}, false)
+		m.all = items
 		m.rebuildFiltered()
 		return m
 	}
@@ -127,7 +125,7 @@ func TestRebuildFiltered(t *testing.T) {
 			"/p/abc-alpha": 10.0, // high frecency
 			"/p/abc-omega": 1.0,  // low frecency
 		})
-		m.query = "abc"
+		m.tiQuery.SetValue("abc")
 		m.rebuildFiltered()
 
 		if len(m.filtered) < 2 {
@@ -196,7 +194,7 @@ func TestRebuildFiltered(t *testing.T) {
 		}
 		m := makeModel(items, map[string]float64{})
 		m.switchOnly = true
-		m.query = "proj"
+		m.tiQuery.SetValue("proj")
 		m.rebuildFiltered()
 
 		for _, item := range m.filtered {
@@ -245,7 +243,9 @@ func TestView(t *testing.T) {
 }
 
 func TestUpdateURLInput(t *testing.T) {
-	m := model{inputMode: modeURLInput, normFrec: map[string]float64{}}
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
+	m.inputMode = modeURLInput
+	_ = m.tiURL.Focus()
 
 	// Type characters
 	for _, ch := range []string{"h", "t", "t", "p"} {
@@ -253,16 +253,16 @@ func TestUpdateURLInput(t *testing.T) {
 		updated, _ := m.Update(msg)
 		m = updated.(model)
 	}
-	if m.urlInput != "http" {
-		t.Errorf("urlInput = %q, want %q", m.urlInput, "http")
+	if m.tiURL.Value() != "http" {
+		t.Errorf("tiURL = %q, want %q", m.tiURL.Value(), "http")
 	}
 
 	// Backspace
 	bsp := tea.KeyPressMsg{Code: tea.KeyBackspace}
 	updated, _ := m.Update(bsp)
 	m = updated.(model)
-	if m.urlInput != "htt" {
-		t.Errorf("after backspace urlInput = %q, want %q", m.urlInput, "htt")
+	if m.tiURL.Value() != "htt" {
+		t.Errorf("after backspace tiURL = %q, want %q", m.tiURL.Value(), "htt")
 	}
 
 	// Esc cancels
@@ -272,12 +272,14 @@ func TestUpdateURLInput(t *testing.T) {
 	if m.inputMode != modeNormal {
 		t.Errorf("esc should return to modeNormal, got %v", m.inputMode)
 	}
-	if m.urlInput != "" {
-		t.Errorf("esc should clear urlInput, got %q", m.urlInput)
+	if m.tiURL.Value() != "" {
+		t.Errorf("esc should clear tiURL, got %q", m.tiURL.Value())
 	}
 
 	// Enter with non-empty URL advances to modeDestPicker
-	m2 := model{inputMode: modeURLInput, normFrec: map[string]float64{}}
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
+	m2.inputMode = modeURLInput
+	_ = m2.tiURL.Focus()
 	for _, ch := range []string{"h", "t", "t", "p"} {
 		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
 		updated2, _ := m2.Update(msg)
@@ -303,7 +305,8 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	}
 	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false)
 	m.inputMode = modeDestPicker
-	m.urlInput = "https://github.com/user/myrepo"
+	m.tiURL.SetValue("https://github.com/user/myrepo")
+	_ = m.tiDest.Focus()
 	m.rebuildDestFiltered()
 
 	// Select the candidate and press enter — should detect conflict.
@@ -313,8 +316,8 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	if m.inputMode != modeCloneName {
 		t.Errorf("conflict should advance to modeCloneName, got %v", m.inputMode)
 	}
-	if m.cloneNameInput != "myrepo" {
-		t.Errorf("cloneNameInput = %q, want %q", m.cloneNameInput, "myrepo")
+	if m.tiCloneName.Value() != "myrepo" {
+		t.Errorf("tiCloneName = %q, want %q", m.tiCloneName.Value(), "myrepo")
 	}
 
 	// Type a new name and confirm.
@@ -336,11 +339,10 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 }
 
 func TestUpdateCloneName_esc(t *testing.T) {
-	m := model{
-		inputMode:      modeCloneName,
-		cloneNameInput: "myrepo",
-		normFrec:       map[string]float64{},
-	}
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
+	m.inputMode = modeCloneName
+	m.tiCloneName.SetValue("myrepo")
+	_ = m.tiCloneName.Focus()
 	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
 	updated, _ := m.Update(esc)
 	m = updated.(model)

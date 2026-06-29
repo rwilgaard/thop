@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"charm.land/bubbles/v2/textinput"
 	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/git"
@@ -21,8 +22,6 @@ const activeLabel = "● open "
 const leftPad = " "
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// ── Scoring ──────────────────────────────────────────────────────────────────
 
 func normalizeScores(scores map[string]float64) map[string]float64 {
 	out := make(map[string]float64, len(scores))
@@ -41,13 +40,10 @@ func normalizeScores(scores map[string]float64) map[string]float64 {
 	return out
 }
 
-// combineScore merges a normalized fuzzy score and a normalized frecency score
-// using a 60/40 weighting. Both inputs must be in [0,1].
+// combineScore weights fuzzy 60%, frecency 40%.
 func combineScore(normFuzzyScore, normFrecency float64) float64 {
 	return normFuzzyScore*0.6 + normFrecency*0.4
 }
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 type viewMode int
 
@@ -61,12 +57,11 @@ type inputMode int
 
 const (
 	modeNormal     inputMode = iota
-	modeURLInput             // Ctrl-G: typing clone URL
-	modeDestPicker           // after URL confirmed: fuzzy-pick destination
-	modeCloneName            // dest conflict: type alternate folder name
+	modeURLInput             // Ctrl-G
+	modeDestPicker           // pick clone destination directory
+	modeCloneName            // rename on conflict
 )
 
-// Result is returned by Run and RunDestPicker.
 type Result struct {
 	Candidate candidates.Candidate
 	Clone     *CloneRequest
@@ -80,7 +75,7 @@ type CloneRequest struct {
 type baseItem struct {
 	candidate candidates.Candidate
 	active    bool
-	display   string // ANSI-colored display string
+	display   string
 }
 
 type scoredItem struct {
@@ -89,28 +84,25 @@ type scoredItem struct {
 }
 
 type model struct {
-	all        []baseItem
-	normFrec   map[string]float64
-	filtered   []scoredItem
-	query      string
-	cursor     int
+	all      []baseItem
+	normFrec map[string]float64
+	filtered []scoredItem
+	tiQuery  textinput.Model // modeNormal search
+	cursor   int
 	view       viewMode
 	switchOnly bool
 	width      int
 	height     int
-	result     Result // replaces chosen candidates.Candidate
+	result     Result
 	ready      bool
-	// modal state
-	inputMode      inputMode
-	urlInput       string
-	destQuery      string
-	destFiltered   []scoredItem
-	destCursor     int
-	cloneDestDir   string // chosen parent dir (set when conflict detected)
-	cloneNameInput string // alternate name being typed in modeCloneName
+	inputMode    inputMode
+	tiURL        textinput.Model // modeURLInput
+	tiDest       textinput.Model // modeDestPicker
+	tiCloneName  textinput.Model // modeCloneName
+	destFiltered []scoredItem
+	destCursor   int
+	cloneDestDir string // chosen parent dir (set when conflict detected)
 }
-
-// ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
 	styleSep            lipgloss.Style
@@ -131,7 +123,12 @@ func initStyles(cfg config.Config) {
 	styleDimActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.ActiveColor))
 }
 
-// ── Constructor ───────────────────────────────────────────────────────────────
+func newTextInput(prompt string) textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = prompt
+	ti.CharLimit = 0
+	return ti
+}
 
 func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool) model {
 	all := make([]baseItem, 0, len(cs))
@@ -139,10 +136,15 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Tmux
 		all = append(all, makeBaseItem(c, ts))
 	}
 	m := model{
-		all:        all,
-		normFrec:   normalizeScores(scores),
-		switchOnly: switchOnly,
+		all:         all,
+		normFrec:    normalizeScores(scores),
+		switchOnly:  switchOnly,
+		tiQuery:     newTextInput(""),
+		tiURL:       newTextInput(""),
+		tiDest:      newTextInput(""),
+		tiCloneName: newTextInput(""),
 	}
+	_ = m.tiQuery.Focus()
 	m.rebuildFiltered()
 	return m
 }
@@ -156,12 +158,11 @@ func makeBaseItem(c candidates.Candidate, ts tmux.TmuxState) baseItem {
 	}
 }
 
-// ── Filtering & scoring ───────────────────────────────────────────────────────
-
 func (m *model) rebuildFiltered() {
+	query := m.tiQuery.Value()
 	var result []scoredItem
 
-	if m.query == "" {
+	if query == "" {
 		for _, item := range m.all {
 			if m.switchOnly && !item.active {
 				continue
@@ -178,15 +179,13 @@ func (m *model) rebuildFiltered() {
 			return result[i].score > result[j].score
 		})
 	} else {
-		// Fuzzy match on RelPath (no ANSI codes to trip up matching).
+		// fuzzy match on RelPath — avoids ANSI escape codes in display strings
 		keys := make([]string, len(m.all))
 		for i, item := range m.all {
 			keys[i] = item.candidate.RelPath
 		}
-		matches := fuzzy.Find(m.query, keys)
+		matches := fuzzy.Find(query, keys)
 
-		// Step 1: filter to only visible matches so normalization is over the
-		// displayed set, not over hidden items.
 		type pendingItem struct {
 			base     baseItem
 			rawScore float64
@@ -203,8 +202,6 @@ func (m *model) rebuildFiltered() {
 			pending = append(pending, pendingItem{base: item, rawScore: float64(match.Score)})
 		}
 
-		// Step 2: normalize raw fuzzy scores across the visible set so that the
-		// fuzzy contribution is bounded to [0,1] — matching the frecency scale.
 		maxRaw := 0.0
 		for _, p := range pending {
 			if p.rawScore > maxRaw {
@@ -212,7 +209,6 @@ func (m *model) rebuildFiltered() {
 			}
 		}
 
-		// Step 3: combine normalized fuzzy + frecency.
 		for _, p := range pending {
 			normF := 0.0
 			if maxRaw > 0 {
@@ -235,8 +231,9 @@ func (m *model) rebuildFiltered() {
 }
 
 func (m *model) rebuildDestFiltered() {
+	destQuery := m.tiDest.Value()
 	var result []scoredItem
-	if m.destQuery == "" {
+	if destQuery == "" {
 		for _, item := range m.all {
 			if item.candidate.IsRepo {
 				continue
@@ -251,7 +248,7 @@ func (m *model) rebuildDestFiltered() {
 		for i, item := range m.all {
 			keys[i] = item.candidate.RelPath
 		}
-		matches := fuzzy.Find(m.destQuery, keys)
+		matches := fuzzy.Find(destQuery, keys)
 		maxRaw := 0.0
 		type pending struct {
 			base     baseItem
@@ -300,8 +297,6 @@ func (m *model) matchesView(item baseItem) bool {
 	}
 }
 
-// ── Bubbletea interface ───────────────────────────────────────────────────────
-
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -322,7 +317,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNormal(msg)
 		}
 	}
-	return m, nil
+	// Forward all messages to the active textinput so paste, blink, etc. work.
+	var cmd tea.Cmd
+	switch m.inputMode {
+	case modeNormal:
+		prev := m.tiQuery.Value()
+		m.tiQuery, cmd = m.tiQuery.Update(msg)
+		if m.tiQuery.Value() != prev {
+			m.cursor = 0
+			m.rebuildFiltered()
+		}
+	case modeURLInput:
+		m.tiURL, cmd = m.tiURL.Update(msg)
+	case modeDestPicker:
+		prev := m.tiDest.Value()
+		m.tiDest, cmd = m.tiDest.Update(msg)
+		if m.tiDest.Value() != prev {
+			m.destCursor = 0
+			m.rebuildDestFiltered()
+		}
+	case modeCloneName:
+		m.tiCloneName, cmd = m.tiCloneName.Update(msg)
+	}
+	return m, cmd
 }
 
 func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -342,13 +359,6 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.filtered)-1 {
 			m.cursor++
 		}
-	case "backspace", "ctrl+h":
-		if len(m.query) > 0 {
-			runes := []rune(m.query)
-			m.query = string(runes[:len(runes)-1])
-			m.cursor = 0
-			m.rebuildFiltered()
-		}
 	case "ctrl+a":
 		m.view, m.cursor = viewAll, 0
 		m.rebuildFiltered()
@@ -359,14 +369,19 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.view, m.cursor = viewRepo, 0
 		m.rebuildFiltered()
 	case "ctrl+g":
+		m.tiQuery.Blur()
 		m.inputMode = modeURLInput
-		m.urlInput = ""
+		m.tiURL.SetValue("")
+		return m, m.tiURL.Focus()
 	default:
-		if t := msg.Key().Text; t != "" {
-			m.query += t
+		prev := m.tiQuery.Value()
+		var cmd tea.Cmd
+		m.tiQuery, cmd = m.tiQuery.Update(msg)
+		if m.tiQuery.Value() != prev {
 			m.cursor = 0
 			m.rebuildFiltered()
 		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -374,24 +389,22 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.tiURL.Blur()
+		m.tiURL.SetValue("")
 		m.inputMode = modeNormal
-		m.urlInput = ""
 	case "enter":
-		if m.urlInput != "" {
-			m.inputMode = modeDestPicker
-			m.destQuery = ""
+		if m.tiURL.Value() != "" {
+			m.tiURL.Blur()
+			m.tiDest.SetValue("")
 			m.destCursor = 0
 			m.rebuildDestFiltered()
-		}
-	case "backspace", "ctrl+h":
-		if len(m.urlInput) > 0 {
-			runes := []rune(m.urlInput)
-			m.urlInput = string(runes[:len(runes)-1])
+			m.inputMode = modeDestPicker
+			return m, m.tiDest.Focus()
 		}
 	default:
-		if t := msg.Key().Text; t != "" {
-			m.urlInput += t
-		}
+		var cmd tea.Cmd
+		m.tiURL, cmd = m.tiURL.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -399,19 +412,22 @@ func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.tiDest.Blur()
 		m.inputMode = modeURLInput
+		return m, m.tiURL.Focus()
 	case "enter":
 		if m.destCursor < len(m.destFiltered) {
 			chosen := m.destFiltered[m.destCursor].base.candidate.AbsPath
-			name := git.RepoNameFromURL(m.urlInput)
+			name := git.RepoNameFromURL(m.tiURL.Value())
 			fullDest := filepath.Join(chosen, name)
 			if _, err := os.Stat(fullDest); err == nil {
+				m.tiDest.Blur()
 				m.cloneDestDir = chosen
-				m.cloneNameInput = name
+				m.tiCloneName.SetValue(name)
 				m.inputMode = modeCloneName
-				return m, nil
+				return m, m.tiCloneName.Focus()
 			}
-			m.result.Clone = &CloneRequest{URL: m.urlInput, Dest: fullDest}
+			m.result.Clone = &CloneRequest{URL: m.tiURL.Value(), Dest: fullDest}
 			return m, tea.Quit
 		}
 		return m, tea.Quit
@@ -423,19 +439,15 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.destCursor < len(m.destFiltered)-1 {
 			m.destCursor++
 		}
-	case "backspace", "ctrl+h":
-		if len(m.destQuery) > 0 {
-			runes := []rune(m.destQuery)
-			m.destQuery = string(runes[:len(runes)-1])
-			m.destCursor = 0
-			m.rebuildDestFiltered()
-		}
 	default:
-		if t := msg.Key().Text; t != "" {
-			m.destQuery += t
+		prev := m.tiDest.Value()
+		var cmd tea.Cmd
+		m.tiDest, cmd = m.tiDest.Update(msg)
+		if m.tiDest.Value() != prev {
 			m.destCursor = 0
 			m.rebuildDestFiltered()
 		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -443,30 +455,25 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.tiCloneName.Blur()
 		m.inputMode = modeDestPicker
+		return m, m.tiDest.Focus()
 	case "enter":
-		if m.cloneNameInput != "" {
+		if m.tiCloneName.Value() != "" {
 			m.result.Clone = &CloneRequest{
-				URL:  m.urlInput,
-				Dest: filepath.Join(m.cloneDestDir, m.cloneNameInput),
+				URL:  m.tiURL.Value(),
+				Dest: filepath.Join(m.cloneDestDir, m.tiCloneName.Value()),
 			}
 			return m, tea.Quit
 		}
-	case "backspace", "ctrl+h":
-		if len(m.cloneNameInput) > 0 {
-			runes := []rune(m.cloneNameInput)
-			m.cloneNameInput = string(runes[:len(runes)-1])
-		}
 	default:
-		if t := msg.Key().Text; t != "" {
-			m.cloneNameInput += t
-		}
+		var cmd tea.Cmd
+		m.tiCloneName, cmd = m.tiCloneName.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
 
-// keyHints renders a row of "<key> Action" pairs separated by two spaces.
-// The key bracket uses stylePrompt; the action label uses styleSep.
 func keyHints(pairs [][2]string) (rendered string, width int) {
 	var parts []string
 	for _, p := range pairs {
@@ -495,56 +502,51 @@ func (m model) View() tea.View {
 	sep := strings.Repeat("─", width-2)
 
 	var sb strings.Builder
-
-	// Search / input row
 	var searchLine string
 	switch m.inputMode {
 	case modeURLInput:
 		hints, hintsW := keyHints([][2]string{{"enter", "Confirm"}, {"esc", "Cancel"}})
-		prompt := stylePrompt.Render("clone url: ")
-		input := m.urlInput + "█"
-		promptW := lipgloss.Width(prompt) + len([]rune(m.urlInput)) + 1
-		pad := max(1, width-2-promptW-hintsW)
-		searchLine = leftPad + prompt + input + strings.Repeat(" ", pad) + hints
+		label := stylePrompt.Render("clone url: ")
+		tiView := m.tiURL.View()
+		tiW := lipgloss.Width(tiView)
+		pad := max(1, width-2-lipgloss.Width(label)-tiW-hintsW)
+		searchLine = leftPad + label + tiView + strings.Repeat(" ", pad) + hints
 	case modeDestPicker:
 		hints, hintsW := keyHints([][2]string{{"enter", "Pick"}, {"esc", "Back"}})
-		prompt := stylePrompt.Render("clone into: ")
-		input := m.destQuery + "█"
-		promptW := lipgloss.Width(prompt) + len([]rune(m.destQuery)) + 1
-		pad := max(1, width-2-promptW-hintsW)
-		searchLine = leftPad + prompt + input + strings.Repeat(" ", pad) + hints
+		label := stylePrompt.Render("clone into: ")
+		tiView := m.tiDest.View()
+		tiW := lipgloss.Width(tiView)
+		pad := max(1, width-2-lipgloss.Width(label)-tiW-hintsW)
+		searchLine = leftPad + label + tiView + strings.Repeat(" ", pad) + hints
 	case modeCloneName:
 		hints, hintsW := keyHints([][2]string{{"enter", "Confirm"}, {"esc", "Back"}})
-		prompt := stylePrompt.Render("name conflict — rename: ")
-		input := m.cloneNameInput + "█"
-		promptW := lipgloss.Width(prompt) + len([]rune(m.cloneNameInput)) + 1
-		pad := max(1, width-2-promptW-hintsW)
-		searchLine = leftPad + prompt + input + strings.Repeat(" ", pad) + hints
+		label := stylePrompt.Render("name conflict — rename: ")
+		tiView := m.tiCloneName.View()
+		tiW := lipgloss.Width(tiView)
+		pad := max(1, width-2-lipgloss.Width(label)-tiW-hintsW)
+		searchLine = leftPad + label + tiView + strings.Repeat(" ", pad) + hints
 	default:
 		hints, hintsW := keyHints([][2]string{
 			{"ctrl-g", "Clone"}, {"ctrl-a", "All"}, {"ctrl-p", "Proj"}, {"ctrl-r", "Repo"},
 		})
-		renderedPrompt := stylePrompt.Render("❯ ")
-		promptStr := renderedPrompt + m.query + "█"
-		promptW := lipgloss.Width(renderedPrompt) + len([]rune(m.query)) + 1
-		searchPad := max(1, width-2-promptW-hintsW)
-		searchLine = leftPad + promptStr + strings.Repeat(" ", searchPad) + hints
+		label := stylePrompt.Render("❯ ")
+		tiView := m.tiQuery.View()
+		pad := max(1, width-2-lipgloss.Width(label)-lipgloss.Width(tiView)-hintsW)
+		searchLine = leftPad + label + tiView + strings.Repeat(" ", pad) + hints
 	}
 	sb.WriteString(searchLine)
 	sb.WriteByte('\n')
 
-	// Top separator
 	sb.WriteString(leftPad)
 	sb.WriteString(styleSep.Render(sep))
 	sb.WriteByte('\n')
 
-	// List section — swap for dest picker when in that mode
-	// height budget: search(1) + top-sep(1) + bottom-sep(1) + status(1) = 4
+	// height budget: search + top-sep + bottom-sep + status = 4
 	maxRows := max(5, height-4)
 
 	switch m.inputMode {
 	case modeCloneName:
-		conflict := filepath.Join(m.cloneDestDir, git.RepoNameFromURL(m.urlInput))
+		conflict := filepath.Join(m.cloneDestDir, git.RepoNameFromURL(m.tiURL.Value()))
 		msg := styleSep.Render("⚠ already exists: " + conflict)
 		sb.WriteString(leftPad + msg + "\n")
 		for range maxRows - 1 {
@@ -580,7 +582,7 @@ func (m model) View() tea.View {
 		for i := start; i < end; i++ {
 			item := m.filtered[i]
 			if i == m.cursor {
-				// Strip ANSI so background color covers the full row cleanly.
+				// strip ANSI so background color fills the full row
 				plain := ansiEscape.ReplaceAllString(item.base.display, "")
 				plainW := lipgloss.Width(plain)
 				if item.base.active {
@@ -609,19 +611,16 @@ func (m model) View() tea.View {
 			}
 		}
 
-		// Pad remaining rows so the status bar is bottom-anchored.
 		rendered := end - start
 		for range maxRows - rendered {
 			sb.WriteString("\n")
 		}
 	}
 
-	// Bottom separator
 	sb.WriteString(leftPad)
 	sb.WriteString(styleSep.Render(sep))
 	sb.WriteByte('\n')
 
-	// Status bar: ● all · projects · repos              N items
 	type viewLabel struct {
 		label string
 		mode  viewMode
@@ -647,8 +646,7 @@ func (m model) View() tea.View {
 	statusLeftW := lipgloss.Width(statusLeft)
 	countW := lipgloss.Width(count)
 	statusPad := max(1, width-1-statusLeftW-countW-1)
-	// No trailing newline — the last line must not advance the cursor to the next
-	// row or the terminal scrolls, pushing the search bar (row 0) off screen.
+	// no trailing newline: would scroll the terminal, shifting the search bar off screen
 	sb.WriteString(leftPad)
 	sb.WriteString(statusLeft)
 	sb.WriteString(strings.Repeat(" ", statusPad))
@@ -656,8 +654,6 @@ func (m model) View() tea.View {
 
 	return tea.NewView(sb.String())
 }
-
-// ── Entry point ───────────────────────────────────────────────────────────────
 
 func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, cfg config.Config) (Result, error) {
 	initStyles(cfg)
@@ -673,10 +669,6 @@ func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState
 	return Result{}, nil
 }
 
-// ── Standalone dest picker ────────────────────────────────────────────────────
-
-// RunDestPicker shows the fuzzy candidate picker pre-filtered to non-repo
-// candidates and returns the chosen AbsPath. Used by the CLI clone subcommand.
 func RunDestPicker(cs []candidates.Candidate, cfg config.Config) (string, error) {
 	initStyles(cfg)
 	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false)
