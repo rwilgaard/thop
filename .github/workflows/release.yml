@@ -23,9 +23,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: cachix/install-nix-action@v31
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIX_PACKAGES_TOKEN: ${{ secrets.NIX_PACKAGES_TOKEN }}
