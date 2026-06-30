@@ -27,15 +27,12 @@ clean:
 
 release:
 ifndef version
-	$(error version is required, e.g., 'make release version=0.4.1')
+	$(error version is required, e.g., 'make release version=0.4.2')
 endif
 ifneq ($(shell git status --porcelain),)
-	$(error Git working directory is dirty. Please commit or stash your changes before releasing.)
+	$(error Git working directory is dirty. Commit or stash changes first.)
 endif
-	nix run nixpkgs#nix-update -- --flake --version $(version) default
-	git add flake.nix flake.lock
-	git commit -m "chore: release v$(version)"
 	git tag v$(version)
-	@echo "\nRelease v$(version) prepared and tagged locally."
-	@echo "Run the following to publish to GitHub:\n"
-	@echo "    git push origin main --tags\n"
+	git push origin main
+	git push origin v$(version)
+	@echo "Tagged v$(version) and pushed. GoReleaser will build and update nix-packages."

@@ -26,6 +26,19 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+nix:
+  - name: thop
+    ids: [thop]
+    homepage: "https://github.com/rwilgaard/thop"
+    description: "Fuzzy tmux session manager with frecency ranking"
+    license: "mit"
+    main_program: "thop"
+    repository:
+      owner: rwilgaard
+      name: nix-packages
+      branch: main
+      token: "{{ .Env.NIX_PACKAGES_TOKEN }}"
+
 changelog:
   sort: asc
   filters:
