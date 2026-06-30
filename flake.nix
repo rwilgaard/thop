@@ -23,6 +23,8 @@
             src = self;
             vendorHash = "sha256-epeR/QGb/sWvBAKTqACXPnuFzmA7OpZVyzUHIdt/V9A=";
 
+            nativeCheckInputs = [ pkgs.git ];
+
             ldflags = [
               "-s"
               "-w"
