@@ -29,9 +29,9 @@ make install
 thop                   # open picker
 thop -s                # only show active sessions
 thop ~/projects/myapp  # open a path directly, no picker
+thop clone <url>       # pick a destination and clone
 thop tmp               # create a new tmp project and open it
 thop tmp myname        # create a named tmp project
-thop --clean-tmp       # delete all tmp projects (interactive, no TUI)
 ```
 
 Inside tmux, `thop` opens as a popup. Outside tmux it runs inline.
