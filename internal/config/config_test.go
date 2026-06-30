@@ -26,7 +26,7 @@ func TestExpandHome(t *testing.T) {
 func TestLoad_missingConfig(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
-	cfg := Load(dir, home)
+	cfg := Load(dir, t.TempDir(), home)
 	// defaults returned
 	if cfg.Colors.SelectionBg == "" {
 		t.Error("expected default SelectionBg")
@@ -48,7 +48,7 @@ func TestLoad_existingConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Load(dir, home)
+	cfg := Load(dir, t.TempDir(), home)
 	if len(cfg.Paths) != 2 {
 		t.Fatalf("expected 2 paths, got %d", len(cfg.Paths))
 	}
@@ -71,8 +71,45 @@ func TestLoad_invalidYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	// should not panic; returns defaults
-	cfg := Load(dir, home)
+	cfg := Load(dir, t.TempDir(), home)
 	if cfg.Colors.SelectionBg == "" {
 		t.Error("expected defaults on invalid YAML")
+	}
+}
+
+func TestLoad_tmpPathExplicit(t *testing.T) {
+	dir := t.TempDir()
+	cache := t.TempDir()
+	home := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "paths:\n  - ~/projects\ntmp_path: ~/scratch\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir, cache, home)
+	want := filepath.Join(home, "scratch")
+	if cfg.TmpPath != want {
+		t.Errorf("TmpPath = %q, want %q", cfg.TmpPath, want)
+	}
+}
+
+func TestLoad_tmpPathDefault(t *testing.T) {
+	dir := t.TempDir()
+	cache := t.TempDir()
+	home := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("paths:\n  - ~/projects\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(dir, cache, home)
+	want := filepath.Join(cache, "thop", "tmp")
+	if cfg.TmpPath != want {
+		t.Errorf("TmpPath = %q, want %q", cfg.TmpPath, want)
 	}
 }

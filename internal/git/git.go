@@ -1,7 +1,8 @@
 package git
 
 import (
-	"os"
+	"bytes"
+	"fmt"
 	"os/exec"
 	"path"
 	"strings"
@@ -18,9 +19,16 @@ func RepoNameFromURL(url string) string {
 }
 
 // Clone runs git clone into destPath and returns destPath.
+// Stderr is captured and returned as part of any error so callers can display it.
 func Clone(url, destPath string) (string, error) {
+	var stderr bytes.Buffer
 	cmd := exec.Command("git", "clone", url, destPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return destPath, cmd.Run()
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%s", msg)
+		}
+		return "", err
+	}
+	return destPath, nil
 }

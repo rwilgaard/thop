@@ -81,6 +81,7 @@ func TestFormatDisplay(t *testing.T) {
 		{"repo inactive", Candidate{RelPath: "myrepo", IsRepo: true}, false, colorRepo, false},
 		{"project active", Candidate{RelPath: "myproject", IsRepo: false}, true, colorProject, true},
 		{"repo active", Candidate{RelPath: "myrepo", IsRepo: true}, true, colorRepo, true},
+		{"tmp inactive", Candidate{RelPath: "scratch", IsTmp: true}, false, colorTmp, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -148,5 +149,51 @@ func TestReadCache_emptyFile(t *testing.T) {
 	_, err := readCache(cacheFile, []string{"/root"})
 	if err == nil {
 		t.Error("expected error on empty cache file")
+	}
+}
+
+func TestLoadTmpCandidates(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"scratch-a", "scratch-b"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cands := LoadTmpCandidates(dir)
+	if len(cands) != 2 {
+		t.Fatalf("got %d candidates, want 2", len(cands))
+	}
+	for _, c := range cands {
+		if !c.IsTmp {
+			t.Errorf("candidate %q: IsTmp = false, want true", c.RelPath)
+		}
+		if c.IsRepo {
+			t.Errorf("candidate %q: IsRepo = true, want false", c.RelPath)
+		}
+		if c.Root != dir {
+			t.Errorf("candidate %q: Root = %q, want %q", c.RelPath, c.Root, dir)
+		}
+	}
+}
+
+func TestLoadTmpCandidates_missingDir(t *testing.T) {
+	cands := LoadTmpCandidates("/nonexistent/path/thop/tmp")
+	if cands != nil {
+		t.Errorf("expected nil for missing dir, got %v", cands)
+	}
+}
+
+func TestFormatDisplay_tmp(t *testing.T) {
+	c := Candidate{RelPath: "scratch", IsTmp: true}
+	out := FormatDisplay(c, false)
+	if !strings.Contains(out, colorTmp) {
+		t.Errorf("tmp candidate missing magenta color in %q", out)
+	}
+	if !strings.Contains(out, "scratch") {
+		t.Errorf("tmp candidate missing name in %q", out)
 	}
 }

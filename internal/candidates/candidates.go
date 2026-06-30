@@ -13,8 +13,10 @@ const (
 	colorProject = "\033[34m"
 	colorRepo    = "\033[32m"
 	colorActive  = "\033[33m"
+	colorTmp     = "\033[35m"
 	iconProject  = "󰉋"
 	iconRepo     = ""
+	iconTmp      = "~"
 )
 
 // Candidate is a project directory or git repository openable as a tmux session.
@@ -23,6 +25,7 @@ type Candidate struct {
 	Root    string // scan root this candidate belongs to (or parent dir for direct candidates)
 	RelPath string // relative to Root, used for display and session-name lookup
 	IsRepo  bool
+	IsTmp   bool
 }
 
 // LoadCandidates returns candidates from cache, rebuilding if stale.
@@ -233,13 +236,43 @@ func CandidateActive(c Candidate, sessions, windows map[string]bool) bool {
 
 // FormatDisplay returns an ANSI-colored display string for a candidate row.
 func FormatDisplay(c Candidate, active bool) string {
-	icon, color := iconProject, colorProject
-	if c.IsRepo {
+	var icon, color string
+	switch {
+	case c.IsTmp:
+		icon, color = iconTmp, colorTmp
+	case c.IsRepo:
 		icon, color = iconRepo, colorRepo
+	default:
+		icon, color = iconProject, colorProject
 	}
 	indicator := ""
 	if active {
 		indicator = colorActive + " ●" + colorReset
 	}
-	return color + icon + colorReset + " " + c.RelPath + indicator
+	name := c.RelPath
+	if c.IsTmp {
+		name = colorTmp + c.RelPath + colorReset
+	}
+	return color + icon + colorReset + " " + name + indicator
+}
+
+func LoadTmpCandidates(tmpPath string) []Candidate {
+	entries, err := os.ReadDir(tmpPath)
+	if err != nil {
+		return nil
+	}
+	var out []Candidate
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		out = append(out, Candidate{
+			AbsPath: filepath.Join(tmpPath, name),
+			Root:    tmpPath,
+			RelPath: name,
+			IsTmp:   true,
+		})
+	}
+	return out
 }
