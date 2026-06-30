@@ -387,29 +387,29 @@ func (m *model) rebuildFiltered() {
 
 func (m *model) rebuildDestFiltered() {
 	destQuery := m.tiDest.Value()
+
+	// pool: non-repo candidates from m.all (projects + tmp projects)
+	pool := make([]baseItem, 0, len(m.all))
+	for _, item := range m.all {
+		if !item.candidate.IsRepo {
+			pool = append(pool, item)
+		}
+	}
+
 	var result []scoredItem
 	if destQuery == "" {
-		for _, item := range m.all {
-			if item.candidate.IsTmp || item.candidate.IsRepo {
-				continue
-			}
+		for _, item := range pool {
 			result = append(result, scoredItem{base: item, score: m.normFrec[item.candidate.AbsPath]})
 		}
-		sort.SliceStable(result, func(i, j int) bool {
-			return result[i].score > result[j].score
-		})
+		sort.SliceStable(result, func(i, j int) bool { return result[i].score > result[j].score })
 	} else {
-		keys := make([]string, len(m.all))
-		for i, item := range m.all {
+		keys := make([]string, len(pool))
+		for i, item := range pool {
 			keys[i] = item.candidate.RelPath
 		}
 		var pending []pendingItem
 		for _, match := range fuzzy.Find(destQuery, keys) {
-			item := m.all[match.Index]
-			if item.candidate.IsTmp || item.candidate.IsRepo {
-				continue
-			}
-			pending = append(pending, pendingItem{base: item, rawScore: float64(match.Score)})
+			pending = append(pending, pendingItem{base: pool[match.Index], rawScore: float64(match.Score)})
 		}
 		result = m.scoreAndSort(pending)
 	}

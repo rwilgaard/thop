@@ -74,7 +74,7 @@ func main() {
 		if loadErr != nil {
 			fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", loadErr)
 		}
-		cloned, err := ui.RunDestPicker(static, cfg, inTmux, url)
+		cloned, err := ui.RunDestPicker(append(static, candidates.LoadTmpCandidates(cfg.TmpPath)...), cfg, inTmux, url)
 		if err != nil {
 			fatalf("dest picker: %v", err)
 		}
