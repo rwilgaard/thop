@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/frecency"
-	"github.com/rwilgaard/thop/internal/git"
 	"github.com/rwilgaard/thop/internal/tmux"
 	"github.com/rwilgaard/thop/internal/ui"
 )
@@ -21,9 +21,20 @@ import (
 var version = "dev"
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: thop [flags] [path | clone <url> | tmp [name]]\n\n")
+		fmt.Fprintf(os.Stderr, "Commands:\n")
+		fmt.Fprintf(os.Stderr, "  thop                open the project picker\n")
+		fmt.Fprintf(os.Stderr, "  thop <path>         open a path directly\n")
+		fmt.Fprintf(os.Stderr, "  thop clone <url>    pick a destination and clone\n")
+		fmt.Fprintf(os.Stderr, "  thop tmp [name]     create and open a tmp project\n\n")
+		fmt.Fprintf(os.Stderr, "Flags:\n")
+		flag.PrintDefaults()
+	}
+
 	var (
 		switchOnly  = flag.Bool("s", false, "only show active sessions")
-		popup       = flag.Bool("popup", false, "")
+		popup       = flag.Bool("popup", false, "internal: already running inside tmux popup")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -43,7 +54,7 @@ func main() {
 	xdgConfig := envOr("XDG_CONFIG_HOME", home+"/.config")
 	frecencyFile := xdgData + "/thop/history"
 	cacheFile := xdgCache + "/thop/candidates"
-	cfg := config.Load(xdgConfig, home)
+	cfg := config.Load(xdgConfig, xdgCache, home)
 
 	if len(cfg.Paths) == 0 {
 		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
@@ -75,14 +86,31 @@ func main() {
 		if loadErr != nil {
 			fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", loadErr)
 		}
-		dest, err := ui.RunDestPicker(static, cfg)
+		inTmux := os.Getenv("TMUX") != ""
+		cloned, err := ui.RunDestPicker(static, cfg, inTmux, url)
 		if err != nil {
 			fatalf("dest picker: %v", err)
 		}
-		if dest == "" {
+		if cloned == "" {
 			return
 		}
-		doClone(url, dest, frecencyFile)
+		if err := frecency.Record(frecencyFile, cloned); err != nil {
+			fmt.Fprintln(os.Stderr, "frecency:", err)
+		}
+		if !inTmux {
+			if err := tmux.HandleSelection(cloned, ""); err != nil {
+				fatalf("%v", err)
+			}
+		}
+		return
+	}
+
+	if flag.NArg() >= 1 && flag.Arg(0) == "tmp" {
+		name := ""
+		if flag.NArg() >= 2 {
+			name = flag.Arg(1)
+		}
+		doTmp(cfg.TmpPath, name, frecencyFile)
 		return
 	}
 
@@ -150,34 +178,61 @@ func main() {
 		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
 	}
 
-	result, err := ui.Run(static, scores, tmuxState, *switchOnly, cfg)
+	inTmux := os.Getenv("TMUX") != ""
+	tmpCands := candidates.LoadTmpCandidates(cfg.TmpPath)
+	result, err := ui.Run(append(static, tmpCands...), scores, tmuxState, *switchOnly, cfg, inTmux)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "thop:", err)
 		return
 	}
 
 	switch {
-	case result.Clone != nil:
-		doClone(result.Clone.URL, result.Clone.Dest, frecencyFile)
+	case result.Clone != nil && result.Clone.Cloned != "":
+		if err := frecency.Record(frecencyFile, result.Clone.Cloned); err != nil {
+			fmt.Fprintln(os.Stderr, "frecency:", err)
+		}
+		if !inTmux {
+			if err := tmux.HandleSelection(result.Clone.Cloned, ""); err != nil {
+				fatalf("%v", err)
+			}
+		}
+	case result.Tmp != nil && result.Tmp.Path != "":
+		if err := frecency.Record(frecencyFile, result.Tmp.Path); err != nil {
+			fmt.Fprintln(os.Stderr, "frecency:", err)
+		}
+		if !inTmux {
+			if err := tmux.HandleSelection(result.Tmp.Path, cfg.TmpPath); err != nil {
+				fatalf("%v", err)
+			}
+		}
 	case result.Candidate.AbsPath != "":
 		if err := frecency.Record(frecencyFile, result.Candidate.AbsPath); err != nil {
 			fmt.Fprintln(os.Stderr, "frecency:", err)
 		}
-		if err := tmux.HandleSelection(result.Candidate.AbsPath, result.Candidate.Root); err != nil {
-			fatalf("%v", err)
+		if !inTmux {
+			if err := tmux.HandleSelection(result.Candidate.AbsPath, result.Candidate.Root); err != nil {
+				fatalf("%v", err)
+			}
 		}
 	}
 }
 
-func doClone(url, destPath, frecencyFile string) {
-	cloned, err := git.Clone(url, destPath)
-	if err != nil {
-		fatalf("clone: %v", err)
+
+func doTmp(tmpPath, name, frecencyFile string) {
+	if name != "" && (strings.Contains(name, "/") || strings.Contains(name, "..")) {
+		fatalf("tmp name must not contain path separators or '..'")
 	}
-	if err := frecency.Record(frecencyFile, cloned); err != nil {
+	if name == "" {
+		name = "tmp-" + time.Now().Format("20060102-150405")
+	}
+	dest := filepath.Join(tmpPath, name)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		fatalf("create tmp: %v", err)
+	}
+	if err := frecency.Record(frecencyFile, dest); err != nil {
 		fmt.Fprintln(os.Stderr, "frecency:", err)
 	}
-	if err := tmux.HandleSelection(cloned, ""); err != nil {
+	if err := tmux.HandleSelection(dest, tmpPath); err != nil {
 		fatalf("%v", err)
 	}
 }

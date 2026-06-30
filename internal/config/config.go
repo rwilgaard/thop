@@ -14,11 +14,14 @@ type Colors struct {
 	ActiveColor       string `yaml:"active_color"`
 	PromptColor       string `yaml:"prompt_color"`
 	StatusActiveColor string `yaml:"status_active_color"`
+	HelpKeyColor      string `yaml:"help_key_color"`
+	HelpDescColor     string `yaml:"help_desc_color"`
 }
 
 type Config struct {
-	Paths  []string `yaml:"paths"`
-	Colors Colors   `yaml:"colors"`
+	Paths   []string `yaml:"paths"`
+	TmpPath string   `yaml:"tmp_path"`
+	Colors  Colors   `yaml:"colors"`
 }
 
 func defaultConfig() Config {
@@ -40,6 +43,9 @@ paths:
   # - ~/projects
   # - ~/work
 
+# Directory for disposable tmp projects (ctrl-n). Defaults to XDG_CACHE_HOME/thop/tmp.
+# tmp_path: ~/scratch
+
 # Override default UI colors.
 # Values can be terminal color numbers (0-255) or hex codes (#rrggbb).
 # colors:
@@ -48,9 +54,11 @@ paths:
 #   active_color: "11"     # active session indicator
 #   prompt_color: "11"     # search prompt glyph
 #   status_active_color: "11"  # active view label in status bar
+#   help_key_color: ""         # help key text (default: terminal bold)
+#   help_desc_color: ""        # help description text (default: terminal faint)
 `
 
-func Load(xdgConfig, home string) Config {
+func Load(xdgConfig, xdgCache, home string) Config {
 	cfg := defaultConfig()
 	dir := filepath.Join(xdgConfig, "thop")
 	path := filepath.Join(dir, "config.yaml")
@@ -58,14 +66,21 @@ func Load(xdgConfig, home string) Config {
 	if os.IsNotExist(err) {
 		_ = os.MkdirAll(dir, 0o755)
 		_ = os.WriteFile(path, []byte(exampleConfig), 0o644)
+		cfg.TmpPath = filepath.Join(xdgCache, "thop", "tmp")
 		return cfg
 	}
 	if err != nil {
+		cfg.TmpPath = filepath.Join(xdgCache, "thop", "tmp")
 		return cfg
 	}
 	_ = yaml.Unmarshal(data, &cfg)
 	for i, p := range cfg.Paths {
 		cfg.Paths[i] = expandHome(p, home)
+	}
+	if cfg.TmpPath == "" {
+		cfg.TmpPath = filepath.Join(xdgCache, "thop", "tmp")
+	} else {
+		cfg.TmpPath = expandHome(cfg.TmpPath, home)
 	}
 	return cfg
 }

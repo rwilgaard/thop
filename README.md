@@ -29,6 +29,9 @@ make install
 thop                   # open picker
 thop -s                # only show active sessions
 thop ~/projects/myapp  # open a path directly, no picker
+thop tmp               # create a new tmp project and open it
+thop tmp myname        # create a named tmp project
+thop --clean-tmp       # delete all tmp projects (interactive, no TUI)
 ```
 
 Inside tmux, `thop` opens as a popup. Outside tmux it runs inline.
@@ -44,7 +47,18 @@ Inside tmux, `thop` opens as a popup. Outside tmux it runs inline.
 | `Ctrl-A` | Show all |
 | `Ctrl-P` | Projects only |
 | `Ctrl-R` | Repos only |
+| `Ctrl-T` | Tmp only |
+| `Ctrl-G` | Clone a git repo |
+| `Ctrl-N` | New tmp project |
+| `Ctrl-X` | Delete tmp projects |
+| `?` | Toggle full keymap |
 | `Esc` / `Ctrl-C` | Quit |
+
+### Tmp projects
+
+`Ctrl-N` creates a disposable scratch directory under `tmp_path` and opens it immediately as a tmux session. Projects appear in the picker with a `~` icon.
+
+`Ctrl-X` opens a delete mode: type to filter the list, `Space` to select specific projects, `Enter` to confirm, `Esc` to cancel. With nothing selected, all tmp projects are deleted after confirmation.
 
 ## Configuration
 
@@ -54,6 +68,8 @@ First run creates `~/.config/thop/config.yaml`. Add your project roots:
 paths:
   - ~/projects
   - ~/work
+
+# tmp_path: ~/scratch  # defaults to ~/.cache/thop/tmp
 ```
 
 Colors default to your terminal palette. Override with terminal color numbers (`0`–`255`) or hex codes:
@@ -65,6 +81,8 @@ Colors default to your terminal palette. Override with terminal color numbers (`
 #   active_color: "11"
 #   prompt_color: "11"
 #   status_active_color: "11"
+#   help_key_color: ""
+#   help_desc_color: ""
 ```
 
 ## How it works
@@ -86,3 +104,4 @@ Respects XDG dirs if set.
 | Config | `~/.config/thop/config.yaml` |
 | Candidate cache | `~/.cache/thop/candidates` |
 | Frecency history | `~/.local/share/thop/history` |
+| Tmp projects | `~/.cache/thop/tmp` |

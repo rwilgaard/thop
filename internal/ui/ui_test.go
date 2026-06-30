@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	cand "github.com/rwilgaard/thop/internal/candidates"
+	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/tmux"
 )
 
@@ -85,7 +86,7 @@ func TestCombineScore(t *testing.T) {
 
 func TestRebuildFiltered(t *testing.T) {
 	makeModel := func(items []baseItem, frecency map[string]float64) model {
-		m := newModel(nil, frecency, tmux.TmuxState{}, false)
+		m := newModel(nil, frecency, tmux.TmuxState{}, false, "", config.Colors{})
 		m.all = items
 		m.rebuildFiltered()
 		return m
@@ -215,7 +216,7 @@ func TestView(t *testing.T) {
 		Sessions: map[string]bool{"golang": true},
 		Windows:  map[string]bool{"golang/foo": true},
 	}
-	m := newModel(cs, scores, ts, false)
+	m := newModel(cs, scores, ts, false, "", config.Colors{})
 	m.width = 80
 	m.height = 24
 	m.ready = true
@@ -227,8 +228,7 @@ func TestView(t *testing.T) {
 		desc string
 	}{
 		{"❯", "prompt glyph"},
-		{"<ctrl-g> Clone", "clone hint"},
-		{"<ctrl-a> All", "view hints"},
+		{"?", "help toggle hint"},
 		{"golang/foo", "first item"},
 		{"work", "second item"},
 		{"● open", "active indicator"},
@@ -240,10 +240,19 @@ func TestView(t *testing.T) {
 			t.Errorf("View() missing %s: %q not found", c.desc, c.want)
 		}
 	}
+	if strings.Contains(out, "Clone repository") {
+		t.Error("help content should be hidden by default")
+	}
+
+	m.helpModel.ShowAll = true
+	outHelp := m.View().Content
+	if !strings.Contains(outHelp, "clone") {
+		t.Error("help modal should show clone binding")
+	}
 }
 
 func TestUpdateURLInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
 	m.inputMode = modeURLInput
 	_ = m.tiURL.Focus()
 
@@ -280,7 +289,7 @@ func TestUpdateURLInput(t *testing.T) {
 	}
 
 	// Enter with non-empty URL advances to modeDestPicker
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
 	m2.inputMode = modeURLInput
 	_ = m2.tiURL.Focus()
 	for _, ch := range []string{"h", "t", "t", "p"} {
@@ -306,7 +315,7 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	cs := []cand.Candidate{
 		{AbsPath: parentDir, Root: filepath.Dir(parentDir), RelPath: filepath.Base(parentDir), IsRepo: false},
 	}
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false)
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
 	m.inputMode = modeDestPicker
 	m.tiURL.SetValue("https://github.com/user/myrepo")
 	_ = m.tiDest.Focus()
@@ -339,10 +348,13 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	if m.result.Clone.Dest != wantDest {
 		t.Errorf("Dest = %q, want %q", m.result.Clone.Dest, wantDest)
 	}
+	if m.inputMode != modeLoading {
+		t.Errorf("should be modeLoading after confirming clone name, got %v", m.inputMode)
+	}
 }
 
 func TestUpdateCloneName_esc(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
 	m.inputMode = modeCloneName
 	m.tiCloneName.SetValue("myrepo")
 	_ = m.tiCloneName.Focus()
@@ -351,5 +363,249 @@ func TestUpdateCloneName_esc(t *testing.T) {
 	m = updated.(model)
 	if m.inputMode != modeDestPicker {
 		t.Errorf("esc should return to modeDestPicker, got %v", m.inputMode)
+	}
+}
+
+func TestRebuildFiltered_viewTmp(t *testing.T) {
+	items := []baseItem{
+		{candidate: cand.Candidate{RelPath: "proj", IsRepo: false, IsTmp: false}},
+		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
+	}
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m.all = items
+	m.view = viewTmp
+	m.rebuildFiltered()
+
+	if len(m.filtered) != 1 {
+		t.Fatalf("viewTmp: got %d items, want 1", len(m.filtered))
+	}
+	if !m.filtered[0].base.candidate.IsTmp {
+		t.Errorf("viewTmp: got non-tmp item")
+	}
+}
+
+func TestRebuildFiltered_viewProjectExcludesTmp(t *testing.T) {
+	items := []baseItem{
+		{candidate: cand.Candidate{RelPath: "proj", IsRepo: false, IsTmp: false}},
+		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
+		{candidate: cand.Candidate{RelPath: "repo", IsRepo: true}},
+	}
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m.all = items
+	m.view = viewProject
+	m.rebuildFiltered()
+
+	if len(m.filtered) != 1 || m.filtered[0].base.candidate.RelPath != "proj" {
+		t.Errorf("viewProject should show only non-repo non-tmp, got %v", m.filtered)
+	}
+}
+
+func TestUpdateNameInput(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m.inputMode = modeNameInput
+	_ = m.tiName.Focus()
+
+	for _, ch := range []string{"f", "o", "o"} {
+		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
+		updated, _ := m.Update(msg)
+		m = updated.(model)
+	}
+	if m.tiName.Value() != "foo" {
+		t.Errorf("tiName = %q, want %q", m.tiName.Value(), "foo")
+	}
+
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	updated, _ := m.Update(enter)
+	m = updated.(model)
+	if m.result.Tmp == nil || m.result.Tmp.Name != "foo" {
+		t.Errorf("enter should set Tmp.Name=%q, got %v", "foo", m.result.Tmp)
+	}
+	if m.inputMode != modeLoading {
+		t.Errorf("enter should switch to modeLoading, got %v", m.inputMode)
+	}
+}
+
+func TestUpdateNameInput_conflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "existing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m.inputMode = modeNameInput
+	_ = m.tiName.Focus()
+	m.tiName.SetValue("existing")
+
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+
+	// first enter: should flag conflict, not quit
+	updated, _ := m.Update(enter)
+	m = updated.(model)
+	if !m.nameConflict {
+		t.Error("first enter on existing name should set nameConflict")
+	}
+	if m.result.Tmp != nil {
+		t.Error("should not quit on first conflict")
+	}
+
+	// second enter: should proceed despite conflict (switches to modeLoading)
+	updated, _ = m.Update(enter)
+	m = updated.(model)
+	if m.result.Tmp == nil || m.result.Tmp.Name != "existing" {
+		t.Errorf("second enter should set Tmp.Name=%q, got %v", "existing", m.result.Tmp)
+	}
+	if m.inputMode != modeLoading {
+		t.Errorf("second enter should switch to modeLoading, got %v", m.inputMode)
+	}
+
+	// typing resets conflict flag
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m2.inputMode = modeNameInput
+	m2.nameConflict = true
+	_ = m2.tiName.Focus()
+	m2.tiName.SetValue("exist")
+	ch := tea.KeyPressMsg{Text: "x", Code: 'x'}
+	updated2, _ := m2.Update(ch)
+	m2 = updated2.(model)
+	if m2.nameConflict {
+		t.Error("typing should reset nameConflict")
+	}
+}
+
+func TestUpdateConfirmClean(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m.inputMode = modeCleanTmp
+	m.all = []baseItem{{candidate: scratch}}
+	m.cleanAll = []baseItem{{candidate: scratch}}
+	m.cleanFiltered = m.cleanAll
+	m.rebuildFiltered()
+
+	// enter in clean mode → confirm prompt
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	updated, _ := m.Update(enter)
+	m = updated.(model)
+	if m.inputMode != modeConfirmClean {
+		t.Errorf("enter should go to modeConfirmClean, got %v", m.inputMode)
+	}
+
+	// y confirms delete
+	y := tea.KeyPressMsg{Text: "y", Code: 'y'}
+	updated, _ = m.Update(y)
+	m = updated.(model)
+
+	if m.inputMode != modeNormal {
+		t.Errorf("after y should be modeNormal, got %v", m.inputMode)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "scratch")); !os.IsNotExist(err) {
+		t.Errorf("scratch dir should be deleted after confirm clean")
+	}
+	for _, item := range m.all {
+		if item.candidate.IsTmp {
+			t.Errorf("tmp candidate still in m.all after clean")
+		}
+	}
+}
+
+func TestSelectToggle(t *testing.T) {
+	tmpDir := t.TempDir()
+	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
+
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m.cleanAll = []baseItem{{candidate: scratch}}
+	m.cleanFiltered = m.cleanAll
+	m.cleanCursor = 0
+	m.inputMode = modeCleanTmp
+
+	space := tea.KeyPressMsg{Text: " ", Code: ' '}
+
+	updated, _ := m.Update(space)
+	m = updated.(model)
+	if !m.selected[scratch.AbsPath] {
+		t.Error("space should select item in clean mode")
+	}
+
+	updated, _ = m.Update(space)
+	m = updated.(model)
+	if m.selected[scratch.AbsPath] {
+		t.Error("second space should deselect")
+	}
+}
+
+func TestConfirmClean_selective(t *testing.T) {
+	tmpDir := t.TempDir()
+	for _, name := range []string{"keep", "delete"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := cand.Candidate{RelPath: "keep", IsTmp: true, AbsPath: filepath.Join(tmpDir, "keep")}
+	del := cand.Candidate{RelPath: "delete", IsTmp: true, AbsPath: filepath.Join(tmpDir, "delete")}
+
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m.all = []baseItem{{candidate: keep}, {candidate: del}}
+	m.cleanAll = []baseItem{{candidate: keep}, {candidate: del}}
+	m.cleanFiltered = m.cleanAll
+	m.selected = map[string]bool{del.AbsPath: true}
+	m.inputMode = modeConfirmClean
+	m.rebuildFiltered()
+
+	y := tea.KeyPressMsg{Text: "y", Code: 'y'}
+	updated, _ := m.Update(y)
+	m = updated.(model)
+
+	if _, err := os.Stat(del.AbsPath); !os.IsNotExist(err) {
+		t.Error("selected dir should be deleted")
+	}
+	if _, err := os.Stat(keep.AbsPath); err != nil {
+		t.Error("unselected dir should be kept")
+	}
+	if len(m.selected) != 0 {
+		t.Error("selected should be cleared after delete")
+	}
+	found := false
+	for _, item := range m.all {
+		if item.candidate.AbsPath == keep.AbsPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("kept candidate missing from m.all")
+	}
+}
+
+func TestHelpModal(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m.width = 80
+	m.height = 24
+	m.ready = true
+
+	if m.helpModel.ShowAll {
+		t.Fatal("help should start hidden")
+	}
+
+	q := tea.KeyPressMsg{Text: "?", Code: '?'}
+	updated, _ := m.Update(q)
+	m = updated.(model)
+	if !m.helpModel.ShowAll {
+		t.Error("? should show help")
+	}
+
+	updated, _ = m.Update(q)
+	m = updated.(model)
+	if m.helpModel.ShowAll {
+		t.Error("second ? should hide help")
+	}
+
+	m.helpModel.ShowAll = true
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	updated, _ = m.Update(esc)
+	m = updated.(model)
+	if m.helpModel.ShowAll {
+		t.Error("esc should hide help")
 	}
 }
