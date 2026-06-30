@@ -13,7 +13,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          version = "0.3.3";
+          version = "0.4.0";
         in
         {
           default = pkgs.buildGoModule {
@@ -21,7 +21,7 @@
             inherit version;
 
             src = self;
-            vendorHash = "sha256-W/lSAiVWh7kkdKNT9iSw0JKM42TuaZvxWnnNKtwJV6c=";
+            vendorHash = "sha256-epeR/QGb/sWvBAKTqACXPnuFzmA7OpZVyzUHIdt/V9A=";
 
             ldflags = [
               "-s"
