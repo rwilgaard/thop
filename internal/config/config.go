@@ -59,6 +59,7 @@ paths:
 `
 
 func Load(xdgConfig, xdgCache, home string) Config {
+	tmpDefault := filepath.Join(xdgCache, "thop", "tmp")
 	cfg := defaultConfig()
 	dir := filepath.Join(xdgConfig, "thop")
 	path := filepath.Join(dir, "config.yaml")
@@ -66,11 +67,11 @@ func Load(xdgConfig, xdgCache, home string) Config {
 	if os.IsNotExist(err) {
 		_ = os.MkdirAll(dir, 0o755)
 		_ = os.WriteFile(path, []byte(exampleConfig), 0o644)
-		cfg.TmpPath = filepath.Join(xdgCache, "thop", "tmp")
+		cfg.TmpPath = tmpDefault
 		return cfg
 	}
 	if err != nil {
-		cfg.TmpPath = filepath.Join(xdgCache, "thop", "tmp")
+		cfg.TmpPath = tmpDefault
 		return cfg
 	}
 	_ = yaml.Unmarshal(data, &cfg)
@@ -78,7 +79,7 @@ func Load(xdgConfig, xdgCache, home string) Config {
 		cfg.Paths[i] = expandHome(p, home)
 	}
 	if cfg.TmpPath == "" {
-		cfg.TmpPath = filepath.Join(xdgCache, "thop", "tmp")
+		cfg.TmpPath = tmpDefault
 	} else {
 		cfg.TmpPath = expandHome(cfg.TmpPath, home)
 	}

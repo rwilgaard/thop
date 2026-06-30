@@ -2,16 +2,22 @@ BINARY  := thop
 INSTALL := /usr/local/bin/$(BINARY)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
-.PHONY: build install uninstall vet lint test clean release
+.PHONY: build run install uninstall fmt vet lint test clean release
 
 build:
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/thop
+
+run:
+	go run ./cmd/thop
 
 install: build
 	mv $(BINARY) $(INSTALL)
 
 uninstall:
 	rm -f $(INSTALL)
+
+fmt:
+	gofumpt -w .
 
 vet:
 	go vet ./...

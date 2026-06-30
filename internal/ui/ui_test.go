@@ -86,7 +86,7 @@ func TestCombineScore(t *testing.T) {
 
 func TestRebuildFiltered(t *testing.T) {
 	makeModel := func(items []baseItem, frecency map[string]float64) model {
-		m := newModel(nil, frecency, tmux.TmuxState{}, false, "", config.Colors{})
+		m := newModel(nil, frecency, tmux.TmuxState{}, false, "", config.Colors{}, false)
 		m.all = items
 		m.rebuildFiltered()
 		return m
@@ -216,7 +216,7 @@ func TestView(t *testing.T) {
 		Sessions: map[string]bool{"golang": true},
 		Windows:  map[string]bool{"golang/foo": true},
 	}
-	m := newModel(cs, scores, ts, false, "", config.Colors{})
+	m := newModel(cs, scores, ts, false, "", config.Colors{}, false)
 	m.width = 80
 	m.height = 24
 	m.ready = true
@@ -252,7 +252,7 @@ func TestView(t *testing.T) {
 }
 
 func TestUpdateURLInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.inputMode = modeURLInput
 	_ = m.tiURL.Focus()
 
@@ -289,7 +289,7 @@ func TestUpdateURLInput(t *testing.T) {
 	}
 
 	// Enter with non-empty URL advances to modeDestPicker
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m2.inputMode = modeURLInput
 	_ = m2.tiURL.Focus()
 	for _, ch := range []string{"h", "t", "t", "p"} {
@@ -315,7 +315,7 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	cs := []cand.Candidate{
 		{AbsPath: parentDir, Root: filepath.Dir(parentDir), RelPath: filepath.Base(parentDir), IsRepo: false},
 	}
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.inputMode = modeDestPicker
 	m.tiURL.SetValue("https://github.com/user/myrepo")
 	_ = m.tiDest.Focus()
@@ -354,7 +354,7 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 }
 
 func TestUpdateCloneName_esc(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.inputMode = modeCloneName
 	m.tiCloneName.SetValue("myrepo")
 	_ = m.tiCloneName.Focus()
@@ -371,7 +371,7 @@ func TestRebuildFiltered_viewTmp(t *testing.T) {
 		{candidate: cand.Candidate{RelPath: "proj", IsRepo: false, IsTmp: false}},
 		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
 	}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.all = items
 	m.view = viewTmp
 	m.rebuildFiltered()
@@ -390,7 +390,7 @@ func TestRebuildFiltered_viewProjectExcludesTmp(t *testing.T) {
 		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
 		{candidate: cand.Candidate{RelPath: "repo", IsRepo: true}},
 	}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.all = items
 	m.view = viewProject
 	m.rebuildFiltered()
@@ -401,7 +401,7 @@ func TestRebuildFiltered_viewProjectExcludesTmp(t *testing.T) {
 }
 
 func TestUpdateNameInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.inputMode = modeNameInput
 	_ = m.tiName.Focus()
 
@@ -431,7 +431,7 @@ func TestUpdateNameInput_conflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
 	m.inputMode = modeNameInput
 	_ = m.tiName.Focus()
 	m.tiName.SetValue("existing")
@@ -459,7 +459,7 @@ func TestUpdateNameInput_conflict(t *testing.T) {
 	}
 
 	// typing resets conflict flag
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
 	m2.inputMode = modeNameInput
 	m2.nameConflict = true
 	_ = m2.tiName.Focus()
@@ -478,11 +478,10 @@ func TestUpdateConfirmClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
 	m.inputMode = modeCleanTmp
 	m.all = []baseItem{{candidate: scratch}}
-	m.cleanAll = []baseItem{{candidate: scratch}}
-	m.cleanFiltered = m.cleanAll
+	m.rebuildCleanFiltered()
 	m.rebuildFiltered()
 
 	// enter in clean mode → confirm prompt
@@ -515,9 +514,9 @@ func TestSelectToggle(t *testing.T) {
 	tmpDir := t.TempDir()
 	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
-	m.cleanAll = []baseItem{{candidate: scratch}}
-	m.cleanFiltered = m.cleanAll
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
+	m.all = []baseItem{{candidate: scratch}}
+	m.rebuildCleanFiltered()
 	m.cleanCursor = 0
 	m.inputMode = modeCleanTmp
 
@@ -546,10 +545,9 @@ func TestConfirmClean_selective(t *testing.T) {
 	keep := cand.Candidate{RelPath: "keep", IsTmp: true, AbsPath: filepath.Join(tmpDir, "keep")}
 	del := cand.Candidate{RelPath: "delete", IsTmp: true, AbsPath: filepath.Join(tmpDir, "delete")}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
 	m.all = []baseItem{{candidate: keep}, {candidate: del}}
-	m.cleanAll = []baseItem{{candidate: keep}, {candidate: del}}
-	m.cleanFiltered = m.cleanAll
+	m.rebuildCleanFiltered()
 	m.selected = map[string]bool{del.AbsPath: true}
 	m.inputMode = modeConfirmClean
 	m.rebuildFiltered()
@@ -579,7 +577,7 @@ func TestConfirmClean_selective(t *testing.T) {
 }
 
 func TestHelpModal(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{})
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
 	m.width = 80
 	m.height = 24
 	m.ready = true

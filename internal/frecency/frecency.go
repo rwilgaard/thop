@@ -18,11 +18,16 @@ type entry struct {
 func recencyWeight(lastTs int64) float64 {
 	age := time.Now().Unix() - lastTs
 	switch {
-	case age < 3600:   return 4.0  // < 1 hour
-	case age < 86400:  return 2.0  // < 1 day
-	case age < 604800: return 1.0  // < 1 week
-	case age < 2592000: return 0.5 // < 30 days
-	default:           return 0.25
+	case age < 3600:
+		return 4.0 // < 1 hour
+	case age < 86400:
+		return 2.0 // < 1 day
+	case age < 604800:
+		return 1.0 // < 1 week
+	case age < 2592000:
+		return 0.5 // < 30 days
+	default:
+		return 0.25
 	}
 }
 
