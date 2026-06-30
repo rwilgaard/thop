@@ -392,6 +392,7 @@ func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.tiURL.Blur()
 		m.tiURL.SetValue("")
 		m.inputMode = modeNormal
+		return m, m.tiQuery.Focus()
 	case "enter":
 		if m.tiURL.Value() != "" {
 			m.tiURL.Blur()

@@ -275,6 +275,9 @@ func TestUpdateURLInput(t *testing.T) {
 	if m.tiURL.Value() != "" {
 		t.Errorf("esc should clear tiURL, got %q", m.tiURL.Value())
 	}
+	if !m.tiQuery.Focused() {
+		t.Error("esc should focus tiQuery")
+	}
 
 	// Enter with non-empty URL advances to modeDestPicker
 	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false)
