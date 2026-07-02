@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,10 @@ paths:
 #   help_desc_color: ""        # help description text (default: terminal faint)
 `
 
-func Load(xdgConfig, xdgCache, home string) Config {
+// Load reads config.yaml, falling back to defaults. A non-nil error means the
+// file existed but could not be read or parsed — defaults are still returned,
+// so callers can warn and continue.
+func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	tmpDefault := filepath.Join(xdgCache, "thop", "tmp")
 	cfg := defaultConfig()
 	dir := filepath.Join(xdgConfig, "thop")
@@ -68,13 +72,17 @@ func Load(xdgConfig, xdgCache, home string) Config {
 		_ = os.MkdirAll(dir, 0o755)
 		_ = os.WriteFile(path, []byte(exampleConfig), 0o644)
 		cfg.TmpPath = tmpDefault
-		return cfg
+		return cfg, nil
 	}
 	if err != nil {
 		cfg.TmpPath = tmpDefault
-		return cfg
+		return cfg, err
 	}
-	_ = yaml.Unmarshal(data, &cfg)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		cfg = defaultConfig()
+		cfg.TmpPath = tmpDefault
+		return cfg, fmt.Errorf("parse %s: %w", path, err)
+	}
 	for i, p := range cfg.Paths {
 		cfg.Paths[i] = expandHome(p, home)
 	}
@@ -83,7 +91,7 @@ func Load(xdgConfig, xdgCache, home string) Config {
 	} else {
 		cfg.TmpPath = expandHome(cfg.TmpPath, home)
 	}
-	return cfg
+	return cfg, nil
 }
 
 func expandHome(path, home string) string {

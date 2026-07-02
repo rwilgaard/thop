@@ -65,10 +65,10 @@ func HandleSelection(selected, root string) error {
 		if isRepo {
 			// kill the initial window so only the repo window remains.
 			windowName := filepath.Base(selected)
-			if err := tmuxRun("new-window", "-a", "-t", sessionName+":{end}", "-n", windowName, "-c", selected); err != nil {
+			if err := tmuxRun("new-window", "-a", "-t", exact(sessionName)+":{end}", "-n", windowName, "-c", selected); err != nil {
 				return fmt.Errorf("open window: %w", err)
 			}
-			_ = tmuxRun("kill-window", "-t", sessionName+":^")
+			_ = tmuxRun("kill-window", "-t", exact(sessionName)+":^")
 		}
 		hydrate(sessionName, projectDir)
 		return switchTo(sessionName)
@@ -87,13 +87,19 @@ func sessionize(name string) string {
 	return strings.ReplaceAll(name, ".", "_")
 }
 
+// exact prefixes a session name with "=" so tmux matches it exactly
+// instead of falling back to prefix matching.
+func exact(session string) string {
+	return "=" + session
+}
+
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
 func hasSession(name string) bool {
-	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+	return exec.Command("tmux", "has-session", "-t", exact(name)).Run() == nil
 }
 
 func newSession(session, startDir, windowName string) error {
@@ -107,8 +113,8 @@ func newSession(session, startDir, windowName string) error {
 func openRepoWindow(session, repoPath string) error {
 	windowName := filepath.Base(repoPath)
 	// Use "=name" prefix for exact-match to avoid tmux parsing dots as window.pane.
-	if err := tmuxRun("select-window", "-t", session+":="+windowName); err != nil {
-		return tmuxRun("new-window", "-a", "-t", session+":{end}", "-n", windowName, "-c", repoPath)
+	if err := tmuxRun("select-window", "-t", exact(session)+":="+windowName); err != nil {
+		return tmuxRun("new-window", "-a", "-t", exact(session)+":{end}", "-n", windowName, "-c", repoPath)
 	}
 	return nil
 }
@@ -126,7 +132,7 @@ func hydrate(session, projectDir string) {
 		src = global
 	}
 	if src != "" {
-		_ = tmuxRun("send-keys", "-t", session, "source "+shellQuote(src), "Enter")
+		_ = tmuxRun("send-keys", "-t", exact(session), "source "+shellQuote(src), "Enter")
 	}
 }
 
@@ -136,13 +142,13 @@ func shellQuote(s string) string {
 
 func switchTo(session string) error {
 	if os.Getenv("TMUX") == "" {
-		cmd := exec.Command("tmux", "attach-session", "-t", session)
+		cmd := exec.Command("tmux", "attach-session", "-t", exact(session))
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
-	return tmuxRun("switch-client", "-t", session)
+	return tmuxRun("switch-client", "-t", exact(session))
 }
 
 func tmuxRun(args ...string) error {

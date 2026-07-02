@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -103,6 +104,32 @@ func TestRecord_incrementsVisits(t *testing.T) {
 	}
 	if entries["foo/bar"].visits != 3 {
 		t.Errorf("visits = %d, want 3", entries["foo/bar"].visits)
+	}
+}
+
+func TestRecord_concurrent(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "history.tsv")
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Go(func() {
+			errs <- Record(file, "foo/bar")
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := readEntries(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries["foo/bar"].visits != n {
+		t.Errorf("visits = %d, want %d", entries["foo/bar"].visits, n)
 	}
 }
 

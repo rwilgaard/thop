@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -46,10 +47,17 @@ func Load(file string) (map[string]float64, error) {
 }
 
 // Record increments the visit count and updates the last-access timestamp for relPath.
+// A flock on a sidecar file serializes concurrent thop instances so no
+// read-modify-write cycle loses updates.
 func Record(file, relPath string) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
+	unlock, err := lock(file + ".lock")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	entries, err := readEntries(file)
 	if err != nil {
 		return err
@@ -59,6 +67,21 @@ func Record(file, relPath string) error {
 	e.lastTs = time.Now().Unix()
 	entries[relPath] = e
 	return writeEntries(file, entries)
+}
+
+func lock(path string) (unlock func(), err error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 func readEntries(file string) (map[string]entry, error) {

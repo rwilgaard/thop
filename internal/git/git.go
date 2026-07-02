@@ -2,10 +2,13 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"path"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // RepoNameFromURL returns the repository name from any git URL.
@@ -20,10 +23,13 @@ func RepoNameFromURL(url string) string {
 
 // Clone runs git clone into destPath and returns destPath.
 // Stderr is captured and returned as part of any error so callers can display it.
-func Clone(url, destPath string) (string, error) {
+// Cancelling ctx sends SIGTERM so git removes the partial clone before exiting.
+func Clone(ctx context.Context, url, destPath string) (string, error) {
 	var stderr bytes.Buffer
-	cmd := exec.Command("git", "clone", url, destPath)
+	cmd := exec.CommandContext(ctx, "git", "clone", url, destPath)
 	cmd.Stderr = &stderr
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return "", fmt.Errorf("%s", msg)
