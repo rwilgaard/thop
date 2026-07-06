@@ -28,7 +28,7 @@ func TestClone(t *testing.T) {
 		t.Fatalf("git init --bare: %v", err)
 	}
 	destPath := filepath.Join(t.TempDir(), RepoNameFromURL(src))
-	cloned, err := Clone(src, destPath)
+	cloned, err := Clone(t.Context(), src, destPath)
 	if err != nil {
 		t.Fatalf("Clone() error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestClone_conflictDetection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(destPath, "existing"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Clone(src, destPath)
+	_, err := Clone(t.Context(), src, destPath)
 	if err == nil {
 		t.Error("expected error cloning into non-empty dir, got nil")
 	}

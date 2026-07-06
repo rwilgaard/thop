@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,6 +193,7 @@ type model struct {
 	inTmux        bool
 	loadingText   string
 	errMsg        string
+	ctx           context.Context // cancelled when the program exits; kills in-flight clones
 }
 
 var (
@@ -243,9 +245,9 @@ func cmdRunSelection(path, root string) tea.Cmd {
 	}
 }
 
-func cmdClone(url, dest string) tea.Cmd {
+func cmdClone(ctx context.Context, url, dest string) tea.Cmd {
 	return func() tea.Msg {
-		cloned, err := git.Clone(url, dest)
+		cloned, err := git.Clone(ctx, url, dest)
 		return cloneDoneMsg{path: cloned, err: err}
 	}
 }
@@ -273,6 +275,7 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Tmux
 		helpModel:   newHelpModel(colors),
 		selected:    make(map[string]bool),
 		inTmux:      inTmux,
+		ctx:         context.Background(),
 		tiQuery:     newTextInput(""),
 		tiURL:       newTextInput(""),
 		tiDest:      newTextInput(""),
@@ -674,7 +677,7 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.tiDest.Blur()
 			m.loadingText = "cloning…"
 			m.inputMode = modeLoading
-			return m, cmdClone(m.tiURL.Value(), fullDest)
+			return m, cmdClone(m.ctx, m.tiURL.Value(), fullDest)
 		}
 		return m, tea.Quit
 	case "up", "ctrl+k":
@@ -714,7 +717,7 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.tiCloneName.Blur()
 			m.loadingText = "cloning…"
 			m.inputMode = modeLoading
-			return m, cmdClone(m.tiURL.Value(), dest)
+			return m, cmdClone(m.ctx, m.tiURL.Value(), dest)
 		}
 	default:
 		var cmd tea.Cmd
@@ -889,7 +892,7 @@ func (m model) View() tea.View {
 		height = 24
 	}
 
-	sep := strings.Repeat("─", width-2)
+	sep := strings.Repeat("─", max(0, width-2))
 
 	var sb strings.Builder
 	var searchLine string
@@ -1129,6 +1132,9 @@ func (m model) View() tea.View {
 func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
 	initStyles(cfg)
 	m := newModel(cs, scores, ts, switchOnly, cfg.TmpPath, cfg.Colors, inTmux)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.ctx = ctx
 	p := tea.NewProgram(m)
 	final, err := p.Run()
 	if err != nil {
@@ -1140,19 +1146,22 @@ func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState
 	return Result{}, nil
 }
 
-func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (string, error) {
+func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
 	initStyles(cfg)
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, "", cfg.Colors, inTmux)
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, cfg.TmpPath, cfg.Colors, inTmux)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.ctx = ctx
 	m.tiURL.SetValue(cloneURL)
 	m.inputMode = modeDestPicker
 	m.rebuildDestFiltered()
 	p := tea.NewProgram(m)
 	final, err := p.Run()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	if fm, ok := final.(model); ok && fm.result.Clone != nil {
-		return fm.result.Clone.Cloned, nil
+	if fm, ok := final.(model); ok {
+		return fm.result, nil
 	}
-	return "", nil
+	return Result{}, nil
 }

@@ -26,7 +26,10 @@ func TestExpandHome(t *testing.T) {
 func TestLoad_missingConfig(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
-	cfg := Load(dir, t.TempDir(), home)
+	cfg, err := Load(dir, t.TempDir(), home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	// defaults returned
 	if cfg.Colors.SelectionBg == "" {
 		t.Error("expected default SelectionBg")
@@ -48,7 +51,10 @@ func TestLoad_existingConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Load(dir, t.TempDir(), home)
+	cfg, err := Load(dir, t.TempDir(), home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(cfg.Paths) != 2 {
 		t.Fatalf("expected 2 paths, got %d", len(cfg.Paths))
 	}
@@ -67,11 +73,14 @@ func TestLoad_invalidYAML(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(":::invalid:::"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("paths: [unclosed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// should not panic; returns defaults
-	cfg := Load(dir, t.TempDir(), home)
+	// returns defaults plus a parse error the caller can warn about
+	cfg, err := Load(dir, t.TempDir(), home)
+	if err == nil {
+		t.Error("expected parse error on invalid YAML")
+	}
 	if cfg.Colors.SelectionBg == "" {
 		t.Error("expected defaults on invalid YAML")
 	}
@@ -89,7 +98,10 @@ func TestLoad_tmpPathExplicit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Load(dir, cache, home)
+	cfg, err := Load(dir, cache, home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := filepath.Join(home, "scratch")
 	if cfg.TmpPath != want {
 		t.Errorf("TmpPath = %q, want %q", cfg.TmpPath, want)
@@ -107,7 +119,10 @@ func TestLoad_tmpPathDefault(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("paths:\n  - ~/projects\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Load(dir, cache, home)
+	cfg, err := Load(dir, cache, home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := filepath.Join(cache, "thop", "tmp")
 	if cfg.TmpPath != want {
 		t.Errorf("TmpPath = %q, want %q", cfg.TmpPath, want)

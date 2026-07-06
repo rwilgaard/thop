@@ -54,7 +54,10 @@ func main() {
 	xdgConfig := envOr("XDG_CONFIG_HOME", home+"/.config")
 	frecencyFile := xdgData + "/thop/history"
 	cacheFile := xdgCache + "/thop/candidates"
-	cfg := config.Load(xdgConfig, xdgCache, home)
+	cfg, cfgErr := config.Load(xdgConfig, xdgCache, home)
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "thop: config: %v\n", cfgErr)
+	}
 	inTmux := os.Getenv("TMUX") != ""
 
 	if len(cfg.Paths) == 0 {
@@ -74,14 +77,11 @@ func main() {
 		if loadErr != nil {
 			fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", loadErr)
 		}
-		cloned, err := ui.RunDestPicker(append(static, candidates.LoadTmpCandidates(cfg.TmpPath)...), cfg, inTmux, url)
+		result, err := ui.RunDestPicker(append(static, candidates.LoadTmpCandidates(cfg.TmpPath)...), cfg, inTmux, url)
 		if err != nil {
 			fatalf("dest picker: %v", err)
 		}
-		if cloned == "" {
-			return
-		}
-		handleOpen(cloned, "", frecencyFile, inTmux)
+		openResult(result, cfg, frecencyFile, inTmux)
 		return
 	}
 
@@ -95,9 +95,15 @@ func main() {
 	}
 
 	if flag.NArg() == 1 {
-		arg := flag.Arg(0)
+		arg, err := filepath.Abs(flag.Arg(0))
+		if err != nil {
+			fatalf("resolve path: %v", err)
+		}
 		// Best-effort root detection for direct invocation: walk config paths.
 		root := guessRoot(arg, cfg.Paths)
+		if err := frecency.Record(frecencyFile, arg); err != nil {
+			fmt.Fprintln(os.Stderr, "frecency:", err)
+		}
 		if err := tmux.HandleSelection(arg, root); err != nil {
 			fatalf("%v", err)
 		}
@@ -154,6 +160,10 @@ func main() {
 		return
 	}
 
+	openResult(result, cfg, frecencyFile, inTmux)
+}
+
+func openResult(result ui.Result, cfg config.Config, frecencyFile string, inTmux bool) {
 	switch {
 	case result.Clone != nil && result.Clone.Cloned != "":
 		handleOpen(result.Clone.Cloned, "", frecencyFile, inTmux)
