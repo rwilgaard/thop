@@ -35,7 +35,7 @@ func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.result.Tmp = &TmpRequest{Name: name}
 		m.tiName.Blur()
-		m.loadingText = "creating…"
+		m.loadingText = "Creating…"
 		m.inputMode = modeLoading
 		return m, tea.Batch(cmdCreateTmp(m.tmpPath, name), m.spin.Tick)
 	default:

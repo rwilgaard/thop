@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -108,7 +107,7 @@ type model struct {
 	tiName        textinput.Model
 	nameConflict  bool // modeNameInput: typed name already exists
 	tmpPath       string
-	helpModel     help.Model
+	showHelp      bool
 	selected      map[string]bool // AbsPath of selected tmp candidates (modeCleanTmp)
 	cleanFiltered []scoredItem    // search-filtered view of tmp candidates
 	cleanCursor   int
@@ -117,14 +116,19 @@ type model struct {
 	spin          spinner.Model
 	loadingText   string
 	errMsg        string
-	errReturnMode inputMode // mode to restore when the error banner is dismissed
+	errReturnMode inputMode       // mode to restore when the error banner is dismissed
 	ctx           context.Context // cancelled when the program exits; kills in-flight clones
 }
 
-func newTextInput(prompt string) textinput.Model {
+func newTextInput(placeholder string) textinput.Model {
 	ti := textinput.New()
-	ti.Prompt = prompt
+	ti.Prompt = ""
+	ti.Placeholder = placeholder
 	ti.CharLimit = 0
+	// bubbles textinput truncates the placeholder to 1 rune when Width is
+	// unset (0) — see placeholderView(). Size it to the placeholder itself
+	// so the full text renders; inputRow still pads the row externally.
+	ti.SetWidth(len([]rune(placeholder)))
 	return ti
 }
 
@@ -151,7 +155,7 @@ func cmdCreateTmp(tmpPath, name string) tea.Cmd {
 	}
 }
 
-func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, tmpPath string, colors config.Colors, inTmux bool) model {
+func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, tmpPath string, _ config.Colors, inTmux bool) model {
 	all := make([]baseItem, 0, len(cs))
 	for _, c := range cs {
 		all = append(all, makeBaseItem(c, ts))
@@ -161,17 +165,16 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Tmux
 		normFrec:    normalizeScores(scores),
 		switchOnly:  switchOnly,
 		tmpPath:     tmpPath,
-		helpModel:   newHelpModel(colors),
 		selected:    make(map[string]bool),
 		inTmux:      inTmux,
 		spin:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		ctx:         context.Background(),
-		tiQuery:     newTextInput(""),
-		tiURL:       newTextInput(""),
-		tiDest:      newTextInput(""),
+		tiQuery:     newTextInput("Search projects…"),
+		tiURL:       newTextInput("https://github.com/owner/repo.git"),
+		tiDest:      newTextInput("Search folders…"),
 		tiCloneName: newTextInput(""),
-		tiClean:     newTextInput(""),
-		tiName:      newTextInput(""),
+		tiClean:     newTextInput("Search…"),
+		tiName:      newTextInput("Name (empty = auto)"),
 	}
 	_ = m.tiQuery.Focus()
 	m.rebuildFiltered()

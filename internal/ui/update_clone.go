@@ -52,7 +52,7 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			m.result.Clone = &CloneRequest{URL: m.tiURL.Value(), Dest: fullDest}
 			m.tiDest.Blur()
-			m.loadingText = "cloning…"
+			m.loadingText = "Cloning…"
 			m.inputMode = modeLoading
 			return m, tea.Batch(cmdClone(m.ctx, m.tiURL.Value(), fullDest), m.spin.Tick)
 		}
@@ -92,7 +92,7 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				Dest: dest,
 			}
 			m.tiCloneName.Blur()
-			m.loadingText = "cloning…"
+			m.loadingText = "Cloning…"
 			m.inputMode = modeLoading
 			return m, tea.Batch(cmdClone(m.ctx, m.tiURL.Value(), dest), m.spin.Tick)
 		}

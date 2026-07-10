@@ -21,6 +21,8 @@ var (
 	styleDimActive      lipgloss.Style
 	styleTmpName        lipgloss.Style
 	styleMatch          lipgloss.Style
+	styleHelpKey        lipgloss.Style
+	styleHelpDesc       lipgloss.Style
 )
 
 func initStyles(cfg config.Config) {
@@ -37,6 +39,15 @@ func initStyles(cfg config.Config) {
 		match = c.PromptColor
 	}
 	styleMatch = lipgloss.NewStyle().Foreground(lipgloss.Color(match)).Bold(true)
+
+	styleHelpKey = lipgloss.NewStyle().Bold(true)
+	if c.HelpKeyColor != "" {
+		styleHelpKey = styleHelpKey.Foreground(lipgloss.Color(c.HelpKeyColor))
+	}
+	styleHelpDesc = lipgloss.NewStyle().Faint(true)
+	if c.HelpDescColor != "" {
+		styleHelpDesc = styleHelpDesc.Foreground(lipgloss.Color(c.HelpDescColor))
+	}
 }
 
 func keyHints(pairs [][2]string) string {

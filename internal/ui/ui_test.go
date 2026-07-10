@@ -229,13 +229,13 @@ func TestView(t *testing.T) {
 		desc string
 	}{
 		{"❯", "prompt glyph"},
-		{"?", "help toggle hint"},
+		{"Help", "help hint"},
 		{"golang/foo", "first item"},
 		{"work", "second item"},
 		{"", "repo icon"},
 		{"󰉋", "project icon"},
 		{"● open", "active indicator"},
-		{"● all", "status bar active view"},
+		{"● All", "status bar active view"},
 		{"items", "item count"},
 	}
 	for _, c := range checks {
@@ -247,10 +247,10 @@ func TestView(t *testing.T) {
 		t.Error("help content should be hidden by default")
 	}
 
-	m.helpModel.ShowAll = true
+	m.showHelp = true
 	outHelp := m.View().Content
-	if !strings.Contains(outHelp, "clone") {
-		t.Error("help modal should show clone binding")
+	if !strings.Contains(outHelp, "Clone repository") {
+		t.Error("help overlay should show clone binding")
 	}
 }
 
@@ -579,35 +579,53 @@ func TestConfirmClean_selective(t *testing.T) {
 	}
 }
 
-func TestHelpModal(t *testing.T) {
+func TestHelpOverlay(t *testing.T) {
 	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
-	m.width = 80
-	m.height = 24
-	m.ready = true
+	m.width, m.height, m.ready = 100, 24, true
 
-	if m.helpModel.ShowAll {
+	if m.showHelp {
 		t.Fatal("help should start hidden")
 	}
 
 	q := tea.KeyPressMsg{Text: "?", Code: '?'}
 	updated, _ := m.Update(q)
 	m = updated.(model)
-	if !m.helpModel.ShowAll {
+	if !m.showHelp {
 		t.Error("? should show help")
+	}
+
+	out := m.View().Content
+	for _, w := range []string{"Navigate", "Actions", "Filters", "Clone repository", "Move up", "Projects only"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("help overlay missing %q", w)
+		}
 	}
 
 	updated, _ = m.Update(q)
 	m = updated.(model)
-	if m.helpModel.ShowAll {
+	if m.showHelp {
 		t.Error("second ? should hide help")
 	}
 
-	m.helpModel.ShowAll = true
+	m.showHelp = true
 	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
 	updated, _ = m.Update(esc)
 	m = updated.(model)
-	if m.helpModel.ShowAll {
+	if m.showHelp {
 		t.Error("esc should hide help")
+	}
+}
+
+func TestHelpOverlay_narrow(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.width, m.height, m.ready = 60, 24, true
+	m.showHelp = true
+
+	out := m.View().Content
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > 60 {
+			t.Errorf("line exceeds width 60 (got %d): %q", w, line)
+		}
 	}
 }
 
@@ -644,16 +662,16 @@ func TestView_emptyState(t *testing.T) {
 	m.width, m.height, m.ready = 80, 24, true
 
 	out := m.View().Content
-	if !strings.Contains(out, "nothing here") {
-		t.Errorf("empty pool should say 'nothing here': %q", out)
+	if !strings.Contains(out, "Nothing here") {
+		t.Errorf("empty pool should say 'Nothing here': %q", out)
 	}
 
 	m.all = []baseItem{{candidate: cand.Candidate{AbsPath: "/p/foo", RelPath: "foo"}}}
 	m.tiQuery.SetValue("zzz")
 	m.rebuildFiltered()
 	out = m.View().Content
-	if !strings.Contains(out, "no matches") {
-		t.Errorf("query without hits should say 'no matches': %q", out)
+	if !strings.Contains(out, "No matches") {
+		t.Errorf("query without hits should say 'No matches': %q", out)
 	}
 }
 
@@ -724,19 +742,121 @@ func TestLoadingSpinner(t *testing.T) {
 	if !strings.Contains(out, m.spin.View()) {
 		t.Errorf("loading view should contain spinner frame %q: %q", m.spin.View(), out)
 	}
-	if !strings.Contains(out, "creating…") {
+	if !strings.Contains(out, "Creating…") {
 		t.Errorf("loading view should contain loading text: %q", out)
+	}
+}
+
+func TestPlaceholders(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	checks := []struct {
+		got  string
+		want string
+		name string
+	}{
+		{m.tiQuery.Placeholder, "Search projects…", "tiQuery"},
+		{m.tiURL.Placeholder, "https://github.com/owner/repo.git", "tiURL"},
+		{m.tiDest.Placeholder, "Search folders…", "tiDest"},
+		{m.tiCloneName.Placeholder, "", "tiCloneName"},
+		{m.tiClean.Placeholder, "Search…", "tiClean"},
+		{m.tiName.Placeholder, "Name (empty = auto)", "tiName"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s placeholder = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+
+	// Verify all textinputs have cleared default prompt (no stray "> " after "❯")
+	promptChecks := []struct {
+		got  string
+		name string
+	}{
+		{m.tiQuery.Prompt, "tiQuery.Prompt"},
+		{m.tiURL.Prompt, "tiURL.Prompt"},
+		{m.tiDest.Prompt, "tiDest.Prompt"},
+		{m.tiCloneName.Prompt, "tiCloneName.Prompt"},
+		{m.tiClean.Prompt, "tiClean.Prompt"},
+		{m.tiName.Prompt, "tiName.Prompt"},
+	}
+	for _, c := range promptChecks {
+		if c.got != "" {
+			t.Errorf("%s = %q, want empty string", c.name, c.got)
+		}
+	}
+
+	// Render normal mode and verify no stray "❯ >" appears
+	m.width, m.height, m.ready = 80, 24, true
+	out := m.View().Content
+	if strings.Contains(out, "❯ >") {
+		t.Error("normal mode view should not contain stray '❯ >' (textinput default prompt leak)")
+	}
+}
+
+func TestPrompts_modes(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.width, m.height, m.ready = 100, 24, true
+
+	tests := []struct {
+		mode inputMode
+		want []string
+	}{
+		{modeURLInput, []string{"Clone repository ❯", "Clone", "Cancel"}},
+		{modeDestPicker, []string{"Clone › Destination ❯", "Select", "Back"}},
+		{modeCloneName, []string{"Clone › Name conflict ❯", "Clone as", "Back"}},
+		{modeNameInput, []string{"New tmp project ❯", "Create", "Cancel"}},
+		{modeCleanTmp, []string{"Delete tmp projects ❯", "Select", "Delete", "Cancel"}},
+	}
+	for _, tt := range tests {
+		m.inputMode = tt.mode
+		out := m.View().Content
+		for _, w := range tt.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("mode %v: missing %q", tt.mode, w)
+			}
+		}
+	}
+}
+
+func TestConfirmClean_pluralization(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.width, m.height, m.ready = 100, 24, true
+	m.inputMode = modeConfirmClean
+
+	m.selected = map[string]bool{"/t/a": true}
+	if out := m.View().Content; !strings.Contains(out, "Delete 1 tmp project?") {
+		t.Errorf("singular form missing: %q", out)
+	}
+	m.selected = map[string]bool{"/t/a": true, "/t/b": true}
+	if out := m.View().Content; !strings.Contains(out, "Delete 2 tmp projects?") {
+		t.Errorf("plural form missing: %q", out)
+	}
+}
+
+func TestNormalMode_hints(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.width, m.height, m.ready = 100, 24, true
+	out := m.View().Content
+	// "Search projects…" itself can't appear as a contiguous substring:
+	// textinput.View() always renders the placeholder's first rune as a
+	// separate cursor-styled ANSI run, splitting it from the rest.
+	for _, w := range []string{"Open", "Clone", "Help", "earch projects…"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("normal mode missing %q", w)
+		}
 	}
 }
 
 func TestStatusBar_modes(t *testing.T) {
 	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
-	m.width, m.height, m.ready = 80, 24, true
+	m.width, m.height, m.ready = 100, 24, true
 
-	// normal: tabs + count
+	// normal: tabs with keys + count
 	out := m.View().Content
-	if !strings.Contains(out, "● all") || !strings.Contains(out, "0 items") {
-		t.Errorf("normal mode should show tabs and count: %q", out)
+	for _, w := range []string{"^A", "● All", "^P", "Projects", "^R", "Repos", "^T", "Tmp", "0 items"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("normal mode status missing %q: %q", w, out)
+		}
 	}
 
 	// dest picker: clone URL + own count, no tabs
@@ -744,10 +864,10 @@ func TestStatusBar_modes(t *testing.T) {
 	m.tiURL.SetValue("https://x/y.git")
 	m.rebuildDestFiltered()
 	out = m.View().Content
-	if !strings.Contains(out, "clone: https://x/y.git") {
+	if !strings.Contains(out, "Clone: https://x/y.git") {
 		t.Errorf("dest picker should show clone URL: %q", out)
 	}
-	if strings.Contains(out, "● all") {
+	if strings.Contains(out, "● All") {
 		t.Errorf("dest picker should not show view tabs: %q", out)
 	}
 
