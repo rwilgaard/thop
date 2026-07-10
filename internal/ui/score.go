@@ -42,8 +42,9 @@ func (m *model) scoreAndSort(pending []pendingItem) []scoredItem {
 			normF = p.rawScore / maxRaw
 		}
 		result = append(result, scoredItem{
-			base:  p.base,
-			score: combineScore(normF, m.normFrec[p.base.candidate.AbsPath]),
+			base:    p.base,
+			score:   combineScore(normF, m.normFrec[p.base.candidate.AbsPath]),
+			matches: p.matches,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -95,7 +96,7 @@ func (m *model) rebuildFiltered() {
 			if !m.matchesView(item) {
 				continue
 			}
-			pending = append(pending, pendingItem{base: item, rawScore: float64(match.Score)})
+			pending = append(pending, pendingItem{base: item, rawScore: float64(match.Score), matches: match.MatchedIndexes})
 		}
 		result = m.scoreAndSort(pending)
 	}
@@ -130,7 +131,7 @@ func (m *model) rebuildDestFiltered() {
 		}
 		var pending []pendingItem
 		for _, match := range fuzzy.Find(destQuery, keys) {
-			pending = append(pending, pendingItem{base: pool[match.Index], rawScore: float64(match.Score)})
+			pending = append(pending, pendingItem{base: pool[match.Index], rawScore: float64(match.Score), matches: match.MatchedIndexes})
 		}
 		result = m.scoreAndSort(pending)
 	}
@@ -144,7 +145,10 @@ func (m *model) rebuildCleanFiltered() {
 	all := m.tmpItems()
 	query := m.tiClean.Value()
 	if query == "" {
-		m.cleanFiltered = all
+		m.cleanFiltered = make([]scoredItem, len(all))
+		for i, item := range all {
+			m.cleanFiltered[i] = scoredItem{base: item}
+		}
 	} else {
 		keys := make([]string, len(all))
 		for i, item := range all {
@@ -153,7 +157,7 @@ func (m *model) rebuildCleanFiltered() {
 		matches := fuzzy.Find(query, keys)
 		m.cleanFiltered = nil
 		for _, match := range matches {
-			m.cleanFiltered = append(m.cleanFiltered, all[match.Index])
+			m.cleanFiltered = append(m.cleanFiltered, scoredItem{base: all[match.Index], matches: match.MatchedIndexes})
 		}
 	}
 	if m.cleanCursor >= len(m.cleanFiltered) {

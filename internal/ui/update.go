@@ -2,6 +2,7 @@ package ui
 
 import (
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -12,9 +13,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.ready = true
 		m.helpModel.SetWidth(msg.Width)
+	case spinner.TickMsg:
+		if m.inputMode == modeLoading {
+			var cmd tea.Cmd
+			m.spin, cmd = m.spin.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	case selectionDoneMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.errReturnMode = modeNormal
 			m.inputMode = modeError
 			return m, nil
 		}
@@ -22,25 +31,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cloneDoneMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.errReturnMode = modeURLInput
 			m.inputMode = modeError
 			return m, nil
 		}
 		m.result.Clone.Cloned = msg.path
 		if m.inTmux {
 			m.loadingText = "opening…"
-			return m, cmdRunSelection(msg.path, "")
+			return m, tea.Batch(cmdRunSelection(msg.path, ""), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case tmpCreatedMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.errReturnMode = modeNameInput
 			m.inputMode = modeError
 			return m, nil
 		}
 		m.result.Tmp.Path = msg.path
 		if m.inTmux {
 			m.loadingText = "opening…"
-			return m, cmdRunSelection(msg.path, m.tmpPath)
+			return m, tea.Batch(cmdRunSelection(msg.path, m.tmpPath), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case tea.KeyPressMsg:
@@ -120,7 +131,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.inTmux {
 				m.loadingText = "opening…"
 				m.inputMode = modeLoading
-				return m, cmdRunSelection(c.AbsPath, c.Root)
+				return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root), m.spin.Tick)
 			}
 		}
 		return m, tea.Quit
@@ -178,6 +189,18 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateError(_ tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	return m, tea.Quit
+func (m model) updateError(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	m.errMsg = ""
+	m.inputMode = m.errReturnMode
+	switch m.errReturnMode {
+	case modeURLInput:
+		return m, m.tiURL.Focus()
+	case modeNameInput:
+		return m, m.tiName.Focus()
+	default:
+		return m, m.tiQuery.Focus()
+	}
 }

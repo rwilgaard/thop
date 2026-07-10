@@ -13,7 +13,7 @@ import (
 
 type listRow struct {
 	item    baseItem
-	matches []int //nolint:unused // wired up by match highlighting
+	matches []int
 }
 
 type listOpts struct {
@@ -23,6 +23,26 @@ type listOpts struct {
 	showActive bool
 	selected   map[string]bool // non-nil: render ✓ prefix for selected AbsPaths
 	emptyMsg   string
+}
+
+// emptyMsg returns an empty-state message: "nothing here" if pool is empty or
+// query is empty, "no matches" otherwise.
+func emptyMsg(query string, pool int) string {
+	if pool == 0 || query == "" {
+		return "nothing here"
+	}
+	return "no matches"
+}
+
+// nonRepoCount returns the count of non-repo items in the slice.
+func nonRepoCount(items []baseItem) int {
+	count := 0
+	for _, item := range items {
+		if !item.candidate.IsRepo {
+			count++
+		}
+	}
+	return count
 }
 
 // renderRows writes exactly o.maxRows lines: the visible scroll window
@@ -48,6 +68,41 @@ func renderRows(sb *strings.Builder, rows []listRow, o listOpts) {
 	}
 }
 
+// renderName styles name, highlighting matched byte offsets in styleMatch runs.
+// matches must be rune-start byte offsets as produced by fuzzy.Find; mid-rune offsets are ignored.
+func renderName(name string, matches []int, base, match lipgloss.Style) string {
+	if len(matches) == 0 {
+		return base.Render(name)
+	}
+	set := make(map[int]bool, len(matches))
+	for _, i := range matches {
+		set[i] = true
+	}
+	var sb strings.Builder
+	var run []rune
+	var matched bool
+	flush := func() {
+		if len(run) == 0 {
+			return
+		}
+		if matched {
+			sb.WriteString(match.Render(string(run)))
+		} else {
+			sb.WriteString(base.Render(string(run)))
+		}
+		run = run[:0]
+	}
+	for i, r := range name {
+		if set[i] != matched {
+			flush()
+			matched = set[i]
+		}
+		run = append(run, r)
+	}
+	flush()
+	return sb.String()
+}
+
 func renderRow(row listRow, isCursor bool, o listOpts) string {
 	c := row.item.candidate
 	glyph, glyphColor := candidates.Icon(c)
@@ -71,7 +126,11 @@ func renderRow(row listRow, isCursor bool, o listOpts) string {
 		sp = styleSelected.Render(sp)
 	}
 
-	name := nameStyle.Render(c.RelPath)
+	matchStyle := styleMatch
+	if isCursor {
+		matchStyle = matchStyle.Background(styleSelected.GetBackground())
+	}
+	name := renderName(c.RelPath, row.matches, nameStyle, matchStyle)
 
 	showActive := o.showActive && row.item.active
 	rightW := 0
@@ -112,9 +171,9 @@ func (m model) View() tea.View {
 	var searchLine string
 	switch m.inputMode {
 	case modeLoading:
-		searchLine = leftPad + styleSep.Render(m.loadingText)
+		searchLine = leftPad + m.spin.View() + " " + styleSep.Render(m.loadingText)
 	case modeError:
-		hints := keyHints([][2]string{{"any key", "quit"}})
+		hints := keyHints([][2]string{{"any key", "dismiss"}, {"ctrl+c", "quit"}})
 		label := styleSep.Render("⚠  ")
 		searchLine = inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
 	case modeURLInput:
@@ -213,12 +272,13 @@ func (m model) View() tea.View {
 		}
 	case m.inputMode == modeCleanTmp:
 		rows := make([]listRow, len(m.cleanFiltered))
-		for i, item := range m.cleanFiltered {
-			rows[i] = listRow{item: item}
+		for i, it := range m.cleanFiltered {
+			rows[i] = listRow{item: it.base, matches: it.matches}
 		}
 		renderRows(&sb, rows, listOpts{
 			cursor: m.cleanCursor, maxRows: maxRows, width: width,
 			selected: m.selected,
+			emptyMsg: emptyMsg(m.tiClean.Value(), len(m.tmpItems())),
 		})
 	case m.inputMode == modeConfirmClean:
 		var toDelete []baseItem
@@ -229,7 +289,9 @@ func (m model) View() tea.View {
 				}
 			}
 		} else {
-			toDelete = m.cleanFiltered
+			for _, it := range m.cleanFiltered {
+				toDelete = append(toDelete, it.base)
+			}
 		}
 		sb.WriteString(leftPad + styleSep.Render("will delete:") + "\n")
 		rows := 1
@@ -244,19 +306,21 @@ func (m model) View() tea.View {
 	case m.inputMode == modeDestPicker:
 		rows := make([]listRow, len(m.destFiltered))
 		for i, it := range m.destFiltered {
-			rows[i] = listRow{item: it.base}
+			rows[i] = listRow{item: it.base, matches: it.matches}
 		}
 		renderRows(&sb, rows, listOpts{
 			cursor: m.destCursor, maxRows: maxRows, width: width,
+			emptyMsg: emptyMsg(m.tiDest.Value(), nonRepoCount(m.all)),
 		})
 	default:
 		rows := make([]listRow, len(m.filtered))
 		for i, it := range m.filtered {
-			rows[i] = listRow{item: it.base}
+			rows[i] = listRow{item: it.base, matches: it.matches}
 		}
 		renderRows(&sb, rows, listOpts{
 			cursor: m.cursor, maxRows: maxRows, width: width,
 			showActive: true,
+			emptyMsg: emptyMsg(m.tiQuery.Value(), len(m.all)),
 		})
 	}
 
@@ -264,37 +328,54 @@ func (m model) View() tea.View {
 	sb.WriteString(styleSep.Render(sep))
 	sb.WriteByte('\n')
 
-	type viewLabel struct {
-		label string
-		mode  viewMode
-	}
-	viewLabels := []viewLabel{
-		{"all", viewAll},
-		{"projects", viewProject},
-		{"repos", viewRepo},
-		{"tmp", viewTmp},
-	}
-	var statusSb strings.Builder
-	for i, v := range viewLabels {
-		if i > 0 {
-			statusSb.WriteString(styleSep.Render(" · "))
-		}
-		if m.view == v.mode {
-			statusSb.WriteString(styleStatusActive.Render("● " + v.label))
-		} else {
-			statusSb.WriteString(styleSep.Render(v.label))
-		}
-	}
-	statusLeft := statusSb.String()
-	count := styleSep.Render(fmt.Sprintf("%d items", len(m.filtered)))
-	statusLeftW := lipgloss.Width(statusLeft)
-	countW := lipgloss.Width(count)
-	statusPad := max(1, width-1-statusLeftW-countW-1)
 	// no trailing newline: would scroll the terminal, shifting the search bar off screen
-	sb.WriteString(leftPad)
-	sb.WriteString(statusLeft)
-	sb.WriteString(strings.Repeat(" ", statusPad))
-	sb.WriteString(count)
+	sb.WriteString(m.statusBar(width))
 
 	return tea.NewView(sb.String())
+}
+
+func (m model) statusBar(width int) string {
+	var left, right string
+	switch m.inputMode {
+	case modeDestPicker:
+		left = styleSep.Render("clone: " + m.tiURL.Value())
+		right = styleSep.Render(fmt.Sprintf("%d items", len(m.destFiltered)))
+	case modeCleanTmp, modeConfirmClean:
+		left = styleSep.Render(fmt.Sprintf("%d selected", len(m.selected)))
+		right = styleSep.Render(fmt.Sprintf("%d items", len(m.cleanFiltered)))
+	case modeURLInput, modeCloneName:
+		left = styleSep.Render("clone")
+	case modeNameInput:
+		left = styleSep.Render("new tmp")
+	case modeLoading:
+		left = styleSep.Render(m.loadingText)
+	case modeError:
+		left = styleSep.Render("error")
+	default:
+		var sb strings.Builder
+		viewLabels := []struct {
+			label string
+			mode  viewMode
+		}{
+			{"all", viewAll},
+			{"projects", viewProject},
+			{"repos", viewRepo},
+			{"tmp", viewTmp},
+		}
+		for i, v := range viewLabels {
+			if i > 0 {
+				sb.WriteString(styleSep.Render(" · "))
+			}
+			if m.view == v.mode {
+				sb.WriteString(styleStatusActive.Render("● " + v.label))
+			} else {
+				sb.WriteString(styleSep.Render(v.label))
+			}
+		}
+		left = sb.String()
+		right = styleSep.Render(fmt.Sprintf("%d items", len(m.filtered)))
+	}
+	pad := max(1, width-2-lipgloss.Width(left)-lipgloss.Width(right))
+	// no trailing newline: would scroll the terminal, shifting the search bar off screen
+	return leftPad + left + strings.Repeat(" ", pad) + right
 }
