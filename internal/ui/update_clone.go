@@ -54,7 +54,7 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.tiDest.Blur()
 			m.loadingText = "cloning…"
 			m.inputMode = modeLoading
-			return m, cmdClone(m.ctx, m.tiURL.Value(), fullDest)
+			return m, tea.Batch(cmdClone(m.ctx, m.tiURL.Value(), fullDest), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case "up", "ctrl+k":
@@ -94,7 +94,7 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.tiCloneName.Blur()
 			m.loadingText = "cloning…"
 			m.inputMode = modeLoading
-			return m, cmdClone(m.ctx, m.tiURL.Value(), dest)
+			return m, tea.Batch(cmdClone(m.ctx, m.tiURL.Value(), dest), m.spin.Tick)
 		}
 	default:
 		var cmd tea.Cmd

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	cand "github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/tmux"
@@ -607,5 +608,156 @@ func TestHelpModal(t *testing.T) {
 	m = updated.(model)
 	if m.helpModel.ShowAll {
 		t.Error("esc should hide help")
+	}
+}
+
+func TestRenderName_highlights(t *testing.T) {
+	base := lipgloss.NewStyle()
+	match := lipgloss.NewStyle().Bold(true)
+	out := renderName("abc", []int{0, 2}, base, match)
+	// matched runes wrapped in bold, unmatched not. lipgloss v2 resets with
+	// "\x1b[m" rather than "\x1b[0m", so match on the bold-open + reset pair.
+	if !strings.Contains(out, "\x1b[1ma\x1b[m") || !strings.Contains(out, "\x1b[1mc\x1b[m") {
+		t.Errorf("matched runes not bold: %q", out)
+	}
+	if strings.Contains(out, "\x1b[1mb") {
+		t.Errorf("unmatched rune styled: %q", out)
+	}
+}
+
+func TestRebuildFiltered_storesMatches(t *testing.T) {
+	items := []baseItem{{candidate: cand.Candidate{AbsPath: "/p/abc", RelPath: "abc"}}}
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.all = items
+	m.tiQuery.SetValue("ac")
+	m.rebuildFiltered()
+	if len(m.filtered) != 1 {
+		t.Fatalf("got %d items, want 1", len(m.filtered))
+	}
+	if len(m.filtered[0].matches) == 0 {
+		t.Error("matches not stored on scoredItem")
+	}
+}
+
+func TestView_emptyState(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	out := m.View().Content
+	if !strings.Contains(out, "nothing here") {
+		t.Errorf("empty pool should say 'nothing here': %q", out)
+	}
+
+	m.all = []baseItem{{candidate: cand.Candidate{AbsPath: "/p/foo", RelPath: "foo"}}}
+	m.tiQuery.SetValue("zzz")
+	m.rebuildFiltered()
+	out = m.View().Content
+	if !strings.Contains(out, "no matches") {
+		t.Errorf("query without hits should say 'no matches': %q", out)
+	}
+}
+
+func TestErrorRecovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		msg      tea.Msg
+		wantMode inputMode
+	}{
+		{"clone fail returns to URL input", cloneDoneMsg{err: os.ErrPermission}, modeURLInput},
+		{"open fail returns to picker", selectionDoneMsg{err: os.ErrPermission}, modeNormal},
+		{"tmp create fail returns to name input", tmpCreatedMsg{err: os.ErrPermission}, modeNameInput},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+			m.tiURL.SetValue("https://x/y.git")
+			m.result.Clone = &CloneRequest{}
+			m.result.Tmp = &TmpRequest{}
+			m.inputMode = modeLoading
+
+			updated, _ := m.Update(tt.msg)
+			m = updated.(model)
+			if m.inputMode != modeError {
+				t.Fatalf("expected modeError, got %v", m.inputMode)
+			}
+
+			// any key dismisses back to origin
+			updated, _ = m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+			m = updated.(model)
+			if m.inputMode != tt.wantMode {
+				t.Errorf("expected recovery to %v, got %v", tt.wantMode, m.inputMode)
+			}
+			if m.errMsg != "" {
+				t.Error("errMsg should be cleared on dismiss")
+			}
+			if tt.wantMode == modeURLInput && m.tiURL.Value() != "https://x/y.git" {
+				t.Error("URL should be preserved for retry")
+			}
+		})
+	}
+
+	// ctrl+c still quits
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.inputMode = modeError
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Error("ctrl+c in error mode should quit")
+	}
+}
+
+func TestLoadingSpinner(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, t.TempDir(), config.Colors{}, false)
+	m.width, m.height, m.ready = 80, 24, true
+	m.inputMode = modeNameInput
+	m.tiName.SetValue("foo")
+	m.inTmux = true
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(model)
+	if m.inputMode != modeLoading {
+		t.Fatalf("expected modeLoading, got %v", m.inputMode)
+	}
+	if cmd == nil {
+		t.Fatal("entering loading should return a batched cmd (create + spinner tick)")
+	}
+	out := m.View().Content
+	if !strings.Contains(out, m.spin.View()) {
+		t.Errorf("loading view should contain spinner frame %q: %q", m.spin.View(), out)
+	}
+	if !strings.Contains(out, "creating…") {
+		t.Errorf("loading view should contain loading text: %q", out)
+	}
+}
+
+func TestStatusBar_modes(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	// normal: tabs + count
+	out := m.View().Content
+	if !strings.Contains(out, "● all") || !strings.Contains(out, "0 items") {
+		t.Errorf("normal mode should show tabs and count: %q", out)
+	}
+
+	// dest picker: clone URL + own count, no tabs
+	m.inputMode = modeDestPicker
+	m.tiURL.SetValue("https://x/y.git")
+	m.rebuildDestFiltered()
+	out = m.View().Content
+	if !strings.Contains(out, "clone: https://x/y.git") {
+		t.Errorf("dest picker should show clone URL: %q", out)
+	}
+	if strings.Contains(out, "● all") {
+		t.Errorf("dest picker should not show view tabs: %q", out)
+	}
+
+	// clean tmp: N selected + own count
+	m.inputMode = modeCleanTmp
+	m.all = []baseItem{{candidate: cand.Candidate{AbsPath: "/t/a", RelPath: "a", IsTmp: true}}}
+	m.rebuildCleanFiltered()
+	m.selected = map[string]bool{"/t/a": true}
+	out = m.View().Content
+	if !strings.Contains(out, "1 selected") || !strings.Contains(out, "1 items") {
+		t.Errorf("clean mode should show selection and count: %q", out)
 	}
 }

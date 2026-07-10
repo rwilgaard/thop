@@ -37,7 +37,7 @@ func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.tiName.Blur()
 		m.loadingText = "creating…"
 		m.inputMode = modeLoading
-		return m, cmdCreateTmp(m.tmpPath, name)
+		return m, tea.Batch(cmdCreateTmp(m.tmpPath, name), m.spin.Tick)
 	default:
 		prev := m.tiName.Value()
 		var cmd tea.Cmd
@@ -68,7 +68,7 @@ func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "space":
 		if m.cleanCursor < len(m.cleanFiltered) {
-			path := m.cleanFiltered[m.cleanCursor].candidate.AbsPath
+			path := m.cleanFiltered[m.cleanCursor].base.candidate.AbsPath
 			if m.selected[path] {
 				delete(m.selected, path)
 			} else {
@@ -106,7 +106,7 @@ func (m model) updateConfirmClean(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if len(toDelete) == 0 {
 				toDelete = make(map[string]bool, len(m.cleanFiltered))
 				for _, item := range m.cleanFiltered {
-					toDelete[item.candidate.AbsPath] = true
+					toDelete[item.base.candidate.AbsPath] = true
 				}
 			}
 			var kept []baseItem
@@ -127,6 +127,7 @@ func (m model) updateConfirmClean(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuildFiltered()
 			if len(errMsgs) > 0 {
 				m.errMsg = strings.Join(errMsgs, "\n")
+				m.errReturnMode = modeNormal
 				m.inputMode = modeError
 				return m, nil
 			}

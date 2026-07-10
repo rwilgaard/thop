@@ -14,6 +14,7 @@ type Colors struct {
 	SelectionFg       string `yaml:"selection_fg"`
 	ActiveColor       string `yaml:"active_color"`
 	PromptColor       string `yaml:"prompt_color"`
+	MatchColor        string `yaml:"match_color"`
 	StatusActiveColor string `yaml:"status_active_color"`
 	HelpKeyColor      string `yaml:"help_key_color"`
 	HelpDescColor     string `yaml:"help_desc_color"`
@@ -54,7 +55,8 @@ paths:
 #   selection_fg: "15"     # selected item foreground
 #   active_color: "11"     # active session indicator
 #   prompt_color: "11"     # search prompt glyph
-#   status_active_color: "11"  # active view label in status bar
+#   match_color: "11"           # fuzzy match highlight (default: prompt_color)
+#   status_active_color: "11" # active view label in status bar
 #   help_key_color: ""         # help key text (default: terminal bold)
 #   help_desc_color: ""        # help description text (default: terminal faint)
 `

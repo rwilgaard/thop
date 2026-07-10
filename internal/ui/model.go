@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
@@ -74,13 +75,15 @@ type baseItem struct {
 }
 
 type scoredItem struct {
-	base  baseItem
-	score float64
+	base    baseItem
+	score   float64
+	matches []int // matched byte offsets into RelPath
 }
 
 type pendingItem struct {
 	base     baseItem
 	rawScore float64
+	matches  []int
 }
 
 type model struct {
@@ -107,12 +110,14 @@ type model struct {
 	tmpPath       string
 	helpModel     help.Model
 	selected      map[string]bool // AbsPath of selected tmp candidates (modeCleanTmp)
-	cleanFiltered []baseItem      // search-filtered view of tmp candidates
+	cleanFiltered []scoredItem    // search-filtered view of tmp candidates
 	cleanCursor   int
 	tiClean       textinput.Model
 	inTmux        bool
+	spin          spinner.Model
 	loadingText   string
 	errMsg        string
+	errReturnMode inputMode // mode to restore when the error banner is dismissed
 	ctx           context.Context // cancelled when the program exits; kills in-flight clones
 }
 
@@ -159,6 +164,7 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Tmux
 		helpModel:   newHelpModel(colors),
 		selected:    make(map[string]bool),
 		inTmux:      inTmux,
+		spin:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		ctx:         context.Background(),
 		tiQuery:     newTextInput(""),
 		tiURL:       newTextInput(""),
