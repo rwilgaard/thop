@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,6 +24,7 @@ type listOpts struct {
 	showActive bool
 	selected   map[string]bool // non-nil: render ✓ prefix for selected AbsPaths
 	emptyMsg   string
+	reversed   bool
 }
 
 // emptyMsg returns an empty-state message: "Nothing here" if pool is empty or
@@ -45,27 +47,37 @@ func nonRepoCount(items []baseItem) int {
 	return count
 }
 
-// renderRows writes exactly o.maxRows lines: the visible scroll window
-// padded with blanks, or emptyMsg when there are no rows.
-func renderRows(sb *strings.Builder, rows []listRow, o listOpts) {
+// renderRows renders the visible scroll window, or emptyMsg when there are no
+// rows. reversed flips the window so index start renders last (bottom layout).
+func renderRows(rows []listRow, o listOpts) []string {
 	if len(rows) == 0 {
-		if o.emptyMsg != "" {
-			sb.WriteString(leftPad + styleSep.Render(o.emptyMsg))
+		if o.emptyMsg == "" {
+			return nil
 		}
-		sb.WriteByte('\n')
-		for range o.maxRows - 1 {
-			sb.WriteByte('\n')
-		}
-		return
+		return []string{leftPad + styleSep.Render(o.emptyMsg)}
 	}
 	start, end := scrollWindow(o.cursor, o.maxRows, len(rows))
+	out := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		sb.WriteString(renderRow(rows[i], i == o.cursor, o))
-		sb.WriteByte('\n')
+		out = append(out, renderRow(rows[i], i == o.cursor, o))
 	}
-	for range o.maxRows - (end - start) {
-		sb.WriteByte('\n')
+	if o.reversed {
+		slices.Reverse(out)
 	}
+	return out
+}
+
+// fillRows pads lines with blanks to exactly maxRows, anchoring content at the
+// top (default) or bottom (bottom layout). Overflow keeps the leading lines.
+func fillRows(lines []string, maxRows int, bottom bool) []string {
+	if len(lines) > maxRows {
+		lines = lines[:maxRows]
+	}
+	blanks := make([]string, maxRows-len(lines))
+	if bottom {
+		return append(blanks, lines...)
+	}
+	return append(lines, blanks...)
 }
 
 // renderName styles name, highlighting matched byte offsets in styleMatch runs.
@@ -191,33 +203,17 @@ func renderHelpOverlay(width int) string {
 	return strings.Join(cols, "\n\n")
 }
 
-func (m model) View() tea.View {
-	if !m.ready {
-		return tea.NewView("")
-	}
-	width := m.width
-	if width == 0 {
-		width = 80
-	}
-	height := m.height
-	if height == 0 {
-		height = 24
-	}
-
-	sep := strings.Repeat("─", max(0, width-2))
-
-	var sb strings.Builder
-	var searchLine string
+func (m model) searchLine(width int) string {
 	switch m.inputMode {
 	case modeLoading:
-		searchLine = leftPad + m.spin.View() + " " + styleSep.Render(m.loadingText)
+		return leftPad + m.spin.View() + " " + styleSep.Render(m.loadingText)
 	case modeError:
 		hints := keyHints([][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}})
 		label := styleSep.Render("⚠  ")
-		searchLine = inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
+		return inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
 	case modeURLInput:
 		hints := keyHints([][2]string{{"enter", "Clone"}, {"esc", "Cancel"}})
-		searchLine = inputRow(stylePrompt.Render("Clone repository ❯ "), m.tiURL.View(), hints, width)
+		return inputRow(stylePrompt.Render("Clone repository ❯ "), m.tiURL.View(), hints, width)
 	case modeNameInput:
 		hints := keyHints([][2]string{{"enter", "Create"}, {"esc", "Cancel"}})
 		label := stylePrompt.Render("New tmp project ❯ ")
@@ -229,10 +225,10 @@ func (m model) View() tea.View {
 		case m.nameConflict:
 			hint = styleSep.Render(" (Already exists — enter opens it)")
 		}
-		searchLine = inputRow(label, tiView+hint, hints, width)
+		return inputRow(label, tiView+hint, hints, width)
 	case modeCleanTmp:
 		hints := keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
-		searchLine = inputRow(stylePrompt.Render("Delete tmp projects ❯ "), m.tiClean.View(), hints, width)
+		return inputRow(stylePrompt.Render("Delete tmp projects ❯ "), m.tiClean.View(), hints, width)
 	case modeConfirmClean:
 		n := len(m.selected)
 		if n == 0 {
@@ -243,83 +239,57 @@ func (m model) View() tea.View {
 			noun = "project"
 		}
 		yn := styleSep.Render(" [y/N]")
-		searchLine = leftPad + stylePrompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
+		return leftPad + stylePrompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
 	case modeDestPicker:
 		hints := keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
-		searchLine = inputRow(stylePrompt.Render("Clone › Destination ❯ "), m.tiDest.View(), hints, width)
+		return inputRow(stylePrompt.Render("Clone › Destination ❯ "), m.tiDest.View(), hints, width)
 	case modeCloneName:
 		hints := keyHints([][2]string{{"enter", "Clone as"}, {"esc", "Back"}})
-		searchLine = inputRow(stylePrompt.Render("Clone › Name conflict ❯ "), m.tiCloneName.View(), hints, width)
+		return inputRow(stylePrompt.Render("Clone › Name conflict ❯ "), m.tiCloneName.View(), hints, width)
 	default:
 		label := stylePrompt.Render("❯ ")
 		tiView := m.tiQuery.View()
 		if m.showHelp {
-			searchLine = leftPad + label + tiView
-		} else {
-			hints := keyHints([][2]string{{"enter", "Open"}, {"ctrl-g", "Clone"}, {"?", "Help"}})
-			searchLine = inputRow(label, tiView, hints, width)
+			return leftPad + label + tiView
 		}
+		hints := keyHints([][2]string{{"enter", "Open"}, {"ctrl-g", "Clone"}, {"?", "Help"}})
+		return inputRow(label, tiView, hints, width)
 	}
-	sb.WriteString(searchLine)
-	sb.WriteByte('\n')
+}
 
-	sb.WriteString(leftPad)
-	sb.WriteString(styleSep.Render(sep))
-	sb.WriteByte('\n')
-
-	// height budget: search + top-sep + bottom-sep + status = 4
-	maxRows := max(5, height-4)
-
+func (m model) bodyLines(width, maxRows int) []string {
 	switch {
 	case m.inputMode == modeLoading:
-		for range maxRows {
-			sb.WriteByte('\n')
-		}
+		return nil
 	case m.inputMode == modeError:
-		lines := strings.SplitN(m.errMsg, "\n", 2)
-		rows := 0
-		if len(lines) > 1 {
-			for _, line := range strings.Split(lines[1], "\n") {
-				if rows >= maxRows {
-					break
-				}
-				sb.WriteString(leftPad + styleSep.Render(line) + "\n")
-				rows++
-			}
+		parts := strings.SplitN(m.errMsg, "\n", 2)
+		if len(parts) < 2 {
+			return nil
 		}
-		for rows < maxRows {
-			sb.WriteByte('\n')
-			rows++
+		var lines []string
+		for _, line := range strings.Split(parts[1], "\n") {
+			lines = append(lines, leftPad+styleSep.Render(line))
 		}
+		return lines
 	case m.showHelp:
-		rows := 0
+		var lines []string
 		for _, line := range strings.Split(renderHelpOverlay(width), "\n") {
-			if rows >= maxRows {
-				break
-			}
-			sb.WriteString(leftPad + line + "\n")
-			rows++
+			lines = append(lines, leftPad+line)
 		}
-		for rows < maxRows {
-			sb.WriteByte('\n')
-			rows++
-		}
+		return lines
 	case m.inputMode == modeCloneName:
 		conflict := filepath.Join(m.cloneDestDir, git.RepoNameFromURL(m.tiURL.Value()))
-		msg := styleSep.Render("⚠ Already exists: " + conflict)
-		sb.WriteString(leftPad + msg + "\n")
-		for range maxRows - 1 {
-			sb.WriteByte('\n')
-		}
+		return []string{leftPad + styleSep.Render("⚠ Already exists: "+conflict)}
 	case m.inputMode == modeCleanTmp:
 		rows := make([]listRow, len(m.cleanFiltered))
 		for i, it := range m.cleanFiltered {
 			rows[i] = listRow{item: it.base, matches: it.matches}
 		}
-		renderRows(&sb, rows, listOpts{
+		return renderRows(rows, listOpts{
 			cursor: m.cleanCursor, maxRows: maxRows, width: width,
 			selected: m.selected,
 			emptyMsg: emptyMsg(m.tiClean.Value(), len(m.tmpItems())),
+			reversed: m.layoutBottom,
 		})
 	case m.inputMode == modeConfirmClean:
 		var toDelete []baseItem
@@ -334,44 +304,77 @@ func (m model) View() tea.View {
 				toDelete = append(toDelete, it.base)
 			}
 		}
-		sb.WriteString(leftPad + styleSep.Render("Will delete:") + "\n")
-		rows := 1
-		for rows < maxRows && rows-1 < len(toDelete) {
-			sb.WriteString(renderRow(listRow{item: toDelete[rows-1]}, false, listOpts{width: width}) + "\n")
-			rows++
+		lines := []string{leftPad + styleSep.Render("Will delete:")}
+		for _, item := range toDelete {
+			lines = append(lines, renderRow(listRow{item: item}, false, listOpts{width: width}))
 		}
-		for rows < maxRows {
-			sb.WriteByte('\n')
-			rows++
-		}
+		return lines
 	case m.inputMode == modeDestPicker:
 		rows := make([]listRow, len(m.destFiltered))
 		for i, it := range m.destFiltered {
 			rows[i] = listRow{item: it.base, matches: it.matches}
 		}
-		renderRows(&sb, rows, listOpts{
+		return renderRows(rows, listOpts{
 			cursor: m.destCursor, maxRows: maxRows, width: width,
 			emptyMsg: emptyMsg(m.tiDest.Value(), nonRepoCount(m.all)),
+			reversed: m.layoutBottom,
 		})
 	default:
 		rows := make([]listRow, len(m.filtered))
 		for i, it := range m.filtered {
 			rows[i] = listRow{item: it.base, matches: it.matches}
 		}
-		renderRows(&sb, rows, listOpts{
+		return renderRows(rows, listOpts{
 			cursor: m.cursor, maxRows: maxRows, width: width,
 			showActive: true,
 			emptyMsg:   emptyMsg(m.tiQuery.Value(), len(m.all)),
+			reversed:   m.layoutBottom,
 		})
 	}
+}
 
-	sb.WriteString(leftPad)
-	sb.WriteString(styleSep.Render(sep))
-	sb.WriteByte('\n')
+func (m model) View() tea.View {
+	if !m.ready {
+		return tea.NewView("")
+	}
+	width := m.width
+	if width == 0 {
+		width = 80
+	}
+	height := m.height
+	if height == 0 {
+		height = 24
+	}
 
-	// no trailing newline: would scroll the terminal, shifting the search bar off screen
-	sb.WriteString(m.statusBar(width))
+	// height budget: search + top-sep + bottom-sep + status = 4
+	maxRows := max(5, height-4)
+	body := fillRows(m.bodyLines(width, maxRows), maxRows, m.layoutBottom)
+	sepLine := leftPad + styleSep.Render(strings.Repeat("─", max(0, width-2)))
 
+	var sb strings.Builder
+	writeLine := func(l string) {
+		sb.WriteString(l)
+		sb.WriteByte('\n')
+	}
+	if m.layoutBottom {
+		writeLine(m.statusBar(width))
+		writeLine(sepLine)
+		for _, l := range body {
+			writeLine(l)
+		}
+		writeLine(sepLine)
+		// no trailing newline: would scroll the terminal, shifting the frame
+		sb.WriteString(m.searchLine(width))
+	} else {
+		writeLine(m.searchLine(width))
+		writeLine(sepLine)
+		for _, l := range body {
+			writeLine(l)
+		}
+		writeLine(sepLine)
+		// no trailing newline: would scroll the terminal, shifting the frame
+		sb.WriteString(m.statusBar(width))
+	}
 	return tea.NewView(sb.String())
 }
 

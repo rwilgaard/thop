@@ -58,13 +58,9 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "up", "ctrl+k":
-		if m.destCursor > 0 {
-			m.destCursor--
-		}
+		m.destCursor = moveCursor(m.destCursor, m.visualStep(-1), len(m.destFiltered))
 	case "down", "ctrl+j":
-		if m.destCursor < len(m.destFiltered)-1 {
-			m.destCursor++
-		}
+		m.destCursor = moveCursor(m.destCursor, m.visualStep(1), len(m.destFiltered))
 	default:
 		prev := m.tiDest.Value()
 		var cmd tea.Cmd

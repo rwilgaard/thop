@@ -87,7 +87,7 @@ func TestCombineScore(t *testing.T) {
 
 func TestRebuildFiltered(t *testing.T) {
 	makeModel := func(items []baseItem, frecency map[string]float64) model {
-		m := newModel(nil, frecency, tmux.TmuxState{}, false, "", config.Colors{}, false)
+		m := newModel(nil, frecency, tmux.TmuxState{}, false, config.Config{}, false)
 		m.all = items
 		m.rebuildFiltered()
 		return m
@@ -217,7 +217,7 @@ func TestView(t *testing.T) {
 		Sessions: map[string]bool{"golang": true},
 		Windows:  map[string]bool{"golang/foo": true},
 	}
-	m := newModel(cs, scores, ts, false, "", config.Colors{}, false)
+	m := newModel(cs, scores, ts, false, config.Config{}, false)
 	m.width = 80
 	m.height = 24
 	m.ready = true
@@ -255,7 +255,7 @@ func TestView(t *testing.T) {
 }
 
 func TestUpdateURLInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.inputMode = modeURLInput
 	_ = m.tiURL.Focus()
 
@@ -292,7 +292,7 @@ func TestUpdateURLInput(t *testing.T) {
 	}
 
 	// Enter with non-empty URL advances to modeDestPicker
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m2.inputMode = modeURLInput
 	_ = m2.tiURL.Focus()
 	for _, ch := range []string{"h", "t", "t", "p"} {
@@ -318,7 +318,7 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	cs := []cand.Candidate{
 		{AbsPath: parentDir, Root: filepath.Dir(parentDir), RelPath: filepath.Base(parentDir), IsRepo: false},
 	}
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.inputMode = modeDestPicker
 	m.tiURL.SetValue("https://github.com/user/myrepo")
 	_ = m.tiDest.Focus()
@@ -357,7 +357,7 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 }
 
 func TestUpdateCloneName_esc(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.inputMode = modeCloneName
 	m.tiCloneName.SetValue("myrepo")
 	_ = m.tiCloneName.Focus()
@@ -374,7 +374,7 @@ func TestRebuildFiltered_viewTmp(t *testing.T) {
 		{candidate: cand.Candidate{RelPath: "proj", IsRepo: false, IsTmp: false}},
 		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
 	}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.all = items
 	m.view = viewTmp
 	m.rebuildFiltered()
@@ -393,7 +393,7 @@ func TestRebuildFiltered_viewProjectExcludesTmp(t *testing.T) {
 		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
 		{candidate: cand.Candidate{RelPath: "repo", IsRepo: true}},
 	}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.all = items
 	m.view = viewProject
 	m.rebuildFiltered()
@@ -404,7 +404,7 @@ func TestRebuildFiltered_viewProjectExcludesTmp(t *testing.T) {
 }
 
 func TestUpdateNameInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.inputMode = modeNameInput
 	_ = m.tiName.Focus()
 
@@ -434,7 +434,7 @@ func TestUpdateNameInput_conflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.inputMode = modeNameInput
 	_ = m.tiName.Focus()
 	m.tiName.SetValue("existing")
@@ -462,7 +462,7 @@ func TestUpdateNameInput_conflict(t *testing.T) {
 	}
 
 	// typing resets conflict flag
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
+	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
 	m2.inputMode = modeNameInput
 	m2.nameConflict = true
 	_ = m2.tiName.Focus()
@@ -481,7 +481,7 @@ func TestUpdateConfirmClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.inputMode = modeCleanTmp
 	m.all = []baseItem{{candidate: scratch}}
 	m.rebuildCleanFiltered()
@@ -517,7 +517,7 @@ func TestSelectToggle(t *testing.T) {
 	tmpDir := t.TempDir()
 	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.all = []baseItem{{candidate: scratch}}
 	m.rebuildCleanFiltered()
 	m.cleanCursor = 0
@@ -548,7 +548,7 @@ func TestConfirmClean_selective(t *testing.T) {
 	keep := cand.Candidate{RelPath: "keep", IsTmp: true, AbsPath: filepath.Join(tmpDir, "keep")}
 	del := cand.Candidate{RelPath: "delete", IsTmp: true, AbsPath: filepath.Join(tmpDir, "delete")}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, tmpDir, config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.all = []baseItem{{candidate: keep}, {candidate: del}}
 	m.rebuildCleanFiltered()
 	m.selected = map[string]bool{del.AbsPath: true}
@@ -580,7 +580,7 @@ func TestConfirmClean_selective(t *testing.T) {
 }
 
 func TestHelpOverlay(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
 	if m.showHelp {
@@ -617,7 +617,7 @@ func TestHelpOverlay(t *testing.T) {
 }
 
 func TestHelpOverlay_narrow(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 60, 24, true
 	m.showHelp = true
 
@@ -645,7 +645,7 @@ func TestRenderName_highlights(t *testing.T) {
 
 func TestRebuildFiltered_storesMatches(t *testing.T) {
 	items := []baseItem{{candidate: cand.Candidate{AbsPath: "/p/abc", RelPath: "abc"}}}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.all = items
 	m.tiQuery.SetValue("ac")
 	m.rebuildFiltered()
@@ -658,7 +658,7 @@ func TestRebuildFiltered_storesMatches(t *testing.T) {
 }
 
 func TestView_emptyState(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	out := m.View().Content
@@ -687,7 +687,7 @@ func TestErrorRecovery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+			m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 			m.tiURL.SetValue("https://x/y.git")
 			m.result.Clone = &CloneRequest{}
 			m.result.Tmp = &TmpRequest{}
@@ -715,7 +715,7 @@ func TestErrorRecovery(t *testing.T) {
 	}
 
 	// ctrl+c still quits
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.inputMode = modeError
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
@@ -724,7 +724,7 @@ func TestErrorRecovery(t *testing.T) {
 }
 
 func TestLoadingSpinner(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, t.TempDir(), config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: t.TempDir()}, false)
 	m.width, m.height, m.ready = 80, 24, true
 	m.inputMode = modeNameInput
 	m.tiName.SetValue("foo")
@@ -748,7 +748,7 @@ func TestLoadingSpinner(t *testing.T) {
 }
 
 func TestPlaceholders(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	checks := []struct {
 		got  string
 		want string
@@ -794,7 +794,7 @@ func TestPlaceholders(t *testing.T) {
 }
 
 func TestPrompts_modes(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
 	tests := []struct {
@@ -819,7 +819,7 @@ func TestPrompts_modes(t *testing.T) {
 }
 
 func TestConfirmClean_pluralization(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 	m.inputMode = modeConfirmClean
 
@@ -834,7 +834,7 @@ func TestConfirmClean_pluralization(t *testing.T) {
 }
 
 func TestNormalMode_hints(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 	out := m.View().Content
 	// "Search projects…" itself can't appear as a contiguous substring:
@@ -848,7 +848,7 @@ func TestNormalMode_hints(t *testing.T) {
 }
 
 func TestStatusBar_modes(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, "", config.Colors{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
 	// normal: tabs with keys + count
@@ -879,5 +879,152 @@ func TestStatusBar_modes(t *testing.T) {
 	out = m.View().Content
 	if !strings.Contains(out, "1 selected") || !strings.Contains(out, "1 items") {
 		t.Errorf("clean mode should show selection and count: %q", out)
+	}
+}
+
+func TestNewModel_layout(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	if !m.layoutBottom {
+		t.Error("layout: bottom should set layoutBottom")
+	}
+	m = newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	if m.layoutBottom {
+		t.Error("empty layout should default to top")
+	}
+	m = newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "sideways"}, false)
+	if m.layoutBottom {
+		t.Error("unknown layout should default to top")
+	}
+}
+
+func TestLayoutBottom_frame(t *testing.T) {
+	cs := []cand.Candidate{{AbsPath: "/p/foo", RelPath: "foo"}}
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	lines := strings.Split(m.View().Content, "\n")
+	if !strings.Contains(lines[0], "● All") {
+		t.Errorf("bottom layout: first line should be status bar, got %q", lines[0])
+	}
+	if !strings.Contains(lines[len(lines)-1], "❯") {
+		t.Errorf("bottom layout: last line should be search bar, got %q", lines[len(lines)-1])
+	}
+}
+
+func TestLayoutBottom_reversedList(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/best", RelPath: "best"},
+		{AbsPath: "/p/worse", RelPath: "worse"},
+	}
+	scores := map[string]float64{"/p/best": 5.0, "/p/worse": 1.0}
+	m := newModel(cs, scores, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	lines := strings.Split(m.View().Content, "\n")
+	bestIdx, worseIdx := -1, -1
+	for i, l := range lines {
+		if strings.Contains(l, "best") {
+			bestIdx = i
+		}
+		if strings.Contains(l, "worse") {
+			worseIdx = i
+		}
+	}
+	if bestIdx == -1 || worseIdx == -1 {
+		t.Fatalf("items missing: best=%d worse=%d", bestIdx, worseIdx)
+	}
+	if bestIdx < worseIdx {
+		t.Errorf("bottom layout: best match should render below worse match (best=%d worse=%d)", bestIdx, worseIdx)
+	}
+}
+
+func TestLayoutBottom_emptyStateAnchored(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	lines := strings.Split(m.View().Content, "\n")
+	idx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Nothing here") {
+			idx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatal("empty-state message missing")
+	}
+	// frame is 24 lines; message should hug the bottom separator (line len-3)
+	if idx != len(lines)-3 {
+		t.Errorf("bottom layout: empty state at line %d, want %d (adjacent to search bar)", idx, len(lines)-3)
+	}
+}
+
+func TestLayoutBottom_visualCursor(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/best", RelPath: "best"},
+		{AbsPath: "/p/worse", RelPath: "worse"},
+	}
+	scores := map[string]float64{"/p/best": 5.0, "/p/worse": 1.0}
+	m := newModel(cs, scores, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+
+	// bottom layout: best match (index 0) is visually at the bottom.
+	// Up must move visually up = index 1.
+	updated, _ := m.Update(up)
+	m = updated.(model)
+	if m.cursor != 1 {
+		t.Errorf("bottom layout: up from index 0 should reach index 1, got %d", m.cursor)
+	}
+	updated, _ = m.Update(down)
+	m = updated.(model)
+	if m.cursor != 0 {
+		t.Errorf("bottom layout: down should return to index 0, got %d", m.cursor)
+	}
+	// clamp: down at index 0 (visual bottom) stays put
+	updated, _ = m.Update(down)
+	m = updated.(model)
+	if m.cursor != 0 {
+		t.Errorf("bottom layout: down at bottom should clamp, got %d", m.cursor)
+	}
+}
+
+func TestTopLayout_cursor(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/best", RelPath: "best"},
+		{AbsPath: "/p/worse", RelPath: "worse"},
+	}
+	scores := map[string]float64{"/p/best": 5.0, "/p/worse": 1.0}
+	m := newModel(cs, scores, tmux.TmuxState{}, false, config.Config{}, false)
+	m.width, m.height, m.ready = 80, 24, true
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+
+	// top layout: best match (index 0) is visually at the top.
+	// Up at index 0 clamps (stays 0).
+	updated, _ := m.Update(up)
+	m = updated.(model)
+	if m.cursor != 0 {
+		t.Errorf("top layout: up from index 0 should clamp, got %d", m.cursor)
+	}
+	// Down moves to index 1.
+	updated, _ = m.Update(down)
+	m = updated.(model)
+	if m.cursor != 1 {
+		t.Errorf("top layout: down should reach index 1, got %d", m.cursor)
+	}
+	// Down at last index clamps (stays 1).
+	updated, _ = m.Update(down)
+	m = updated.(model)
+	if m.cursor != 1 {
+		t.Errorf("top layout: down at last index should clamp, got %d", m.cursor)
+	}
+	// Up returns to 0.
+	updated, _ = m.Update(up)
+	m = updated.(model)
+	if m.cursor != 0 {
+		t.Errorf("top layout: up should return to index 0, got %d", m.cursor)
 	}
 }

@@ -59,13 +59,9 @@ func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.selected = make(map[string]bool)
 		return m, m.tiQuery.Focus()
 	case "up", "ctrl+k":
-		if m.cleanCursor > 0 {
-			m.cleanCursor--
-		}
+		m.cleanCursor = moveCursor(m.cleanCursor, m.visualStep(-1), len(m.cleanFiltered))
 	case "down", "ctrl+j":
-		if m.cleanCursor < len(m.cleanFiltered)-1 {
-			m.cleanCursor++
-		}
+		m.cleanCursor = moveCursor(m.cleanCursor, m.visualStep(1), len(m.cleanFiltered))
 	case "space":
 		if m.cleanCursor < len(m.cleanFiltered) {
 			path := m.cleanFiltered[m.cleanCursor].base.candidate.AbsPath

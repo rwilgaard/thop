@@ -23,6 +23,7 @@ type Colors struct {
 type Config struct {
 	Paths   []string `yaml:"paths"`
 	TmpPath string   `yaml:"tmp_path"`
+	Layout  string   `yaml:"layout"`
 	Colors  Colors   `yaml:"colors"`
 }
 
@@ -47,6 +48,10 @@ paths:
 
 # Directory for disposable tmp projects (ctrl-n). Defaults to XDG_CACHE_HOME/thop/tmp.
 # tmp_path: ~/scratch
+
+# Search bar position: "top" (default) or "bottom" (status bar moves to top,
+# best match sits next to the search bar).
+# layout: "bottom"
 
 # Override default UI colors.
 # Values can be terminal color numbers (0-255) or hex codes (#rrggbb).
