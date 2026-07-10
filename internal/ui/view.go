@@ -25,13 +25,13 @@ type listOpts struct {
 	emptyMsg   string
 }
 
-// emptyMsg returns an empty-state message: "nothing here" if pool is empty or
-// query is empty, "no matches" otherwise.
+// emptyMsg returns an empty-state message: "Nothing here" if pool is empty or
+// query is empty, "No matches" otherwise.
 func emptyMsg(query string, pool int) string {
 	if pool == 0 || query == "" {
-		return "nothing here"
+		return "Nothing here"
 	}
-	return "no matches"
+	return "No matches"
 }
 
 // nonRepoCount returns the count of non-repo items in the slice.
@@ -152,6 +152,45 @@ func renderRow(row listRow, isCursor bool, o listOpts) string {
 	return prefix + iconStyle.Render(glyph) + sp + name + padStr + right
 }
 
+// joinCols joins column blocks horizontally with the given gap, interleaving
+// gap strings between every pair of columns.
+func joinCols(cols []string, gap string) string {
+	parts := make([]string, 0, len(cols)*2-1)
+	for i, c := range cols {
+		if i > 0 {
+			parts = append(parts, gap)
+		}
+		parts = append(parts, c)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+func renderHelpOverlay(width int) string {
+	cols := make([]string, 0, len(helpGroups))
+	for _, g := range helpGroups {
+		maxKey := 0
+		for _, b := range g.keys {
+			maxKey = max(maxKey, lipgloss.Width(b.Help().Key))
+		}
+		lines := []string{styleSep.Render(g.title)}
+		for _, b := range g.keys {
+			h := b.Help()
+			pad := strings.Repeat(" ", maxKey-lipgloss.Width(h.Key)+2)
+			lines = append(lines, styleHelpKey.Render(h.Key)+pad+styleHelpDesc.Render(h.Desc))
+		}
+		cols = append(cols, strings.Join(lines, "\n"))
+	}
+
+	limit := max(0, width-1)
+	if joined := joinCols(cols, "    "); lipgloss.Width(joined) <= limit {
+		return joined
+	}
+	if joined := joinCols(cols, "  "); lipgloss.Width(joined) <= limit {
+		return joined
+	}
+	return strings.Join(cols, "\n\n")
+}
+
 func (m model) View() tea.View {
 	if !m.ready {
 		return tea.NewView("")
@@ -173,49 +212,52 @@ func (m model) View() tea.View {
 	case modeLoading:
 		searchLine = leftPad + m.spin.View() + " " + styleSep.Render(m.loadingText)
 	case modeError:
-		hints := keyHints([][2]string{{"any key", "dismiss"}, {"ctrl+c", "quit"}})
+		hints := keyHints([][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}})
 		label := styleSep.Render("⚠  ")
 		searchLine = inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
 	case modeURLInput:
-		hints := keyHints([][2]string{{"enter", "Confirm"}, {"esc", "Cancel"}})
-		searchLine = inputRow(stylePrompt.Render("clone url: "), m.tiURL.View(), hints, width)
+		hints := keyHints([][2]string{{"enter", "Clone"}, {"esc", "Cancel"}})
+		searchLine = inputRow(stylePrompt.Render("Clone repository ❯ "), m.tiURL.View(), hints, width)
 	case modeNameInput:
-		hints := keyHints([][2]string{{"enter", "create"}, {"esc", "cancel"}})
-		label := stylePrompt.Render("tmp name: ")
+		hints := keyHints([][2]string{{"enter", "Create"}, {"esc", "Cancel"}})
+		label := stylePrompt.Render("New tmp project ❯ ")
 		tiView := m.tiName.View()
 		var hint string
 		switch {
 		case m.nameConflict && invalidTmpName(m.tiName.Value()):
-			hint = styleSep.Render(" (invalid name)")
+			hint = styleSep.Render(" (Invalid name)")
 		case m.nameConflict:
-			hint = styleSep.Render(" (exists — enter to open)")
-		case m.tiName.Value() == "":
-			hint = styleSep.Render(" (auto)")
+			hint = styleSep.Render(" (Already exists — enter opens it)")
 		}
 		searchLine = inputRow(label, tiView+hint, hints, width)
 	case modeCleanTmp:
-		hints := keyHints([][2]string{{"space", "toggle"}, {"enter", "confirm"}, {"esc", "cancel"}})
-		searchLine = inputRow(stylePrompt.Render("delete tmp: "), m.tiClean.View(), hints, width)
+		hints := keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
+		searchLine = inputRow(stylePrompt.Render("Delete tmp projects ❯ "), m.tiClean.View(), hints, width)
 	case modeConfirmClean:
 		n := len(m.selected)
 		if n == 0 {
 			n = len(m.cleanFiltered)
 		}
+		noun := "projects"
+		if n == 1 {
+			noun = "project"
+		}
 		yn := styleSep.Render(" [y/N]")
-		searchLine = leftPad + stylePrompt.Render(fmt.Sprintf("delete %d tmp project(s)?", n)) + yn
+		searchLine = leftPad + stylePrompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
 	case modeDestPicker:
-		hints := keyHints([][2]string{{"enter", "Pick"}, {"esc", "Back"}})
-		searchLine = inputRow(stylePrompt.Render("clone into: "), m.tiDest.View(), hints, width)
+		hints := keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
+		searchLine = inputRow(stylePrompt.Render("Clone › Destination ❯ "), m.tiDest.View(), hints, width)
 	case modeCloneName:
-		hints := keyHints([][2]string{{"enter", "Confirm"}, {"esc", "Back"}})
-		searchLine = inputRow(stylePrompt.Render("name conflict — rename: "), m.tiCloneName.View(), hints, width)
+		hints := keyHints([][2]string{{"enter", "Clone as"}, {"esc", "Back"}})
+		searchLine = inputRow(stylePrompt.Render("Clone › Name conflict ❯ "), m.tiCloneName.View(), hints, width)
 	default:
 		label := stylePrompt.Render("❯ ")
 		tiView := m.tiQuery.View()
-		if m.helpModel.ShowAll {
+		if m.showHelp {
 			searchLine = leftPad + label + tiView
 		} else {
-			searchLine = inputRow(label, tiView, m.helpModel.View(keys), width)
+			hints := keyHints([][2]string{{"enter", "Open"}, {"ctrl-g", "Clone"}, {"?", "Help"}})
+			searchLine = inputRow(label, tiView, hints, width)
 		}
 	}
 	sb.WriteString(searchLine)
@@ -249,10 +291,9 @@ func (m model) View() tea.View {
 			sb.WriteByte('\n')
 			rows++
 		}
-	case m.helpModel.ShowAll:
-		helpContent := m.helpModel.View(keys)
+	case m.showHelp:
 		rows := 0
-		for _, line := range strings.Split(helpContent, "\n") {
+		for _, line := range strings.Split(renderHelpOverlay(width), "\n") {
 			if rows >= maxRows {
 				break
 			}
@@ -265,7 +306,7 @@ func (m model) View() tea.View {
 		}
 	case m.inputMode == modeCloneName:
 		conflict := filepath.Join(m.cloneDestDir, git.RepoNameFromURL(m.tiURL.Value()))
-		msg := styleSep.Render("⚠ already exists: " + conflict)
+		msg := styleSep.Render("⚠ Already exists: " + conflict)
 		sb.WriteString(leftPad + msg + "\n")
 		for range maxRows - 1 {
 			sb.WriteByte('\n')
@@ -293,7 +334,7 @@ func (m model) View() tea.View {
 				toDelete = append(toDelete, it.base)
 			}
 		}
-		sb.WriteString(leftPad + styleSep.Render("will delete:") + "\n")
+		sb.WriteString(leftPad + styleSep.Render("Will delete:") + "\n")
 		rows := 1
 		for rows < maxRows && rows-1 < len(toDelete) {
 			sb.WriteString(renderRow(listRow{item: toDelete[rows-1]}, false, listOpts{width: width}) + "\n")
@@ -320,7 +361,7 @@ func (m model) View() tea.View {
 		renderRows(&sb, rows, listOpts{
 			cursor: m.cursor, maxRows: maxRows, width: width,
 			showActive: true,
-			emptyMsg: emptyMsg(m.tiQuery.Value(), len(m.all)),
+			emptyMsg:   emptyMsg(m.tiQuery.Value(), len(m.all)),
 		})
 	}
 
@@ -338,34 +379,36 @@ func (m model) statusBar(width int) string {
 	var left, right string
 	switch m.inputMode {
 	case modeDestPicker:
-		left = styleSep.Render("clone: " + m.tiURL.Value())
+		left = styleSep.Render("Clone: " + m.tiURL.Value())
 		right = styleSep.Render(fmt.Sprintf("%d items", len(m.destFiltered)))
 	case modeCleanTmp, modeConfirmClean:
 		left = styleSep.Render(fmt.Sprintf("%d selected", len(m.selected)))
 		right = styleSep.Render(fmt.Sprintf("%d items", len(m.cleanFiltered)))
 	case modeURLInput, modeCloneName:
-		left = styleSep.Render("clone")
+		left = styleSep.Render("Clone")
 	case modeNameInput:
-		left = styleSep.Render("new tmp")
+		left = styleSep.Render("New tmp")
 	case modeLoading:
 		left = styleSep.Render(m.loadingText)
 	case modeError:
-		left = styleSep.Render("error")
+		left = styleSep.Render("Error")
 	default:
 		var sb strings.Builder
 		viewLabels := []struct {
+			key   string
 			label string
 			mode  viewMode
 		}{
-			{"all", viewAll},
-			{"projects", viewProject},
-			{"repos", viewRepo},
-			{"tmp", viewTmp},
+			{"^A", "All", viewAll},
+			{"^P", "Projects", viewProject},
+			{"^R", "Repos", viewRepo},
+			{"^T", "Tmp", viewTmp},
 		}
 		for i, v := range viewLabels {
 			if i > 0 {
 				sb.WriteString(styleSep.Render(" · "))
 			}
+			sb.WriteString(styleSep.Render(v.key + " "))
 			if m.view == v.mode {
 				sb.WriteString(styleStatusActive.Render("● " + v.label))
 			} else {

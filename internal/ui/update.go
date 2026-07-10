@@ -12,7 +12,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
-		m.helpModel.SetWidth(msg.Width)
 	case spinner.TickMsg:
 		if m.inputMode == modeLoading {
 			var cmd tea.Cmd
@@ -37,7 +36,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.result.Clone.Cloned = msg.path
 		if m.inTmux {
-			m.loadingText = "opening…"
+			m.loadingText = "Opening…"
 			return m, tea.Batch(cmdRunSelection(msg.path, ""), m.spin.Tick)
 		}
 		return m, tea.Quit
@@ -50,7 +49,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.result.Tmp.Path = msg.path
 		if m.inTmux {
-			m.loadingText = "opening…"
+			m.loadingText = "Opening…"
 			return m, tea.Batch(cmdRunSelection(msg.path, m.tmpPath), m.spin.Tick)
 		}
 		return m, tea.Quit
@@ -110,12 +109,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.helpModel.ShowAll {
+	if m.showHelp {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "?", "esc":
-			m.helpModel.ShowAll = false
+			m.showHelp = false
 			return m, m.tiQuery.Focus()
 		}
 		return m, nil
@@ -129,7 +128,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			c := m.filtered[m.cursor].base.candidate
 			m.result.Candidate = c
 			if m.inTmux {
-				m.loadingText = "opening…"
+				m.loadingText = "Opening…"
 				m.inputMode = modeLoading
 				return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root), m.spin.Tick)
 			}
@@ -175,7 +174,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.tiClean.Focus()
 	case key.Matches(msg, keys.Help):
 		m.tiQuery.Blur()
-		m.helpModel.ShowAll = true
+		m.showHelp = true
 	default:
 		prev := m.tiQuery.Value()
 		var cmd tea.Cmd
