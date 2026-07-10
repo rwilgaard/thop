@@ -3,7 +3,6 @@ package candidates
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -69,31 +68,22 @@ func TestCandidateActive(t *testing.T) {
 	}
 }
 
-func TestFormatDisplay(t *testing.T) {
+func TestIcon(t *testing.T) {
 	tests := []struct {
 		name      string
 		c         Candidate
-		active    bool
+		wantGlyph string
 		wantColor string
-		wantDot   bool
 	}{
-		{"project inactive", Candidate{RelPath: "myproject", IsRepo: false}, false, colorProject, false},
-		{"repo inactive", Candidate{RelPath: "myrepo", IsRepo: true}, false, colorRepo, false},
-		{"project active", Candidate{RelPath: "myproject", IsRepo: false}, true, colorProject, true},
-		{"repo active", Candidate{RelPath: "myrepo", IsRepo: true}, true, colorRepo, true},
-		{"tmp inactive", Candidate{RelPath: "scratch", IsTmp: true}, false, colorTmp, false},
+		{"project", Candidate{}, "󰉋", "4"},
+		{"repo", Candidate{IsRepo: true}, "", "2"},
+		{"tmp", Candidate{IsTmp: true}, "~", "5"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := FormatDisplay(tt.c, tt.active)
-			if !strings.Contains(out, tt.c.RelPath) {
-				t.Errorf("output missing name: %q", out)
-			}
-			if !strings.Contains(out, tt.wantColor) {
-				t.Errorf("output missing color %q: %q", tt.wantColor, out)
-			}
-			if got := strings.Contains(out, "●"); got != tt.wantDot {
-				t.Errorf("active indicator: got %v, want %v in %q", got, tt.wantDot, out)
+			glyph, color := Icon(tt.c)
+			if glyph != tt.wantGlyph || color != tt.wantColor {
+				t.Errorf("Icon() = %q,%q want %q,%q", glyph, color, tt.wantGlyph, tt.wantColor)
 			}
 		})
 	}
@@ -184,16 +174,5 @@ func TestLoadTmpCandidates_missingDir(t *testing.T) {
 	cands := LoadTmpCandidates("/nonexistent/path/thop/tmp")
 	if cands != nil {
 		t.Errorf("expected nil for missing dir, got %v", cands)
-	}
-}
-
-func TestFormatDisplay_tmp(t *testing.T) {
-	c := Candidate{RelPath: "scratch", IsTmp: true}
-	out := FormatDisplay(c, false)
-	if !strings.Contains(out, colorTmp) {
-		t.Errorf("tmp candidate missing magenta color in %q", out)
-	}
-	if !strings.Contains(out, "scratch") {
-		t.Errorf("tmp candidate missing name in %q", out)
 	}
 }
