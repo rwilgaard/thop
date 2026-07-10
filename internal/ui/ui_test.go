@@ -231,6 +231,8 @@ func TestView(t *testing.T) {
 		{"?", "help toggle hint"},
 		{"golang/foo", "first item"},
 		{"work", "second item"},
+		{"", "repo icon"},
+		{"󰉋", "project icon"},
 		{"● open", "active indicator"},
 		{"● all", "status bar active view"},
 		{"items", "item count"},

@@ -9,14 +9,9 @@ import (
 )
 
 const (
-	colorReset   = "\033[0m"
-	colorProject = "\033[34m"
-	colorRepo    = "\033[32m"
-	colorActive  = "\033[33m"
-	colorTmp     = "\033[35m"
-	iconProject  = "󰉋"
-	iconRepo     = ""
-	iconTmp      = "~"
+	iconProject = "󰉋"
+	iconRepo    = ""
+	iconTmp     = "~"
 )
 
 // Candidate is a project directory or git repository openable as a tmux session.
@@ -234,26 +229,16 @@ func CandidateActive(c Candidate, sessions, windows map[string]bool) bool {
 	return sessions[sessionize(c.RelPath)]
 }
 
-// FormatDisplay returns an ANSI-colored display string for a candidate row.
-func FormatDisplay(c Candidate, active bool) string {
-	var icon, color string
+// Icon returns the type glyph and its ANSI-256 color for a candidate.
+func Icon(c Candidate) (string, string) {
 	switch {
 	case c.IsTmp:
-		icon, color = iconTmp, colorTmp
+		return iconTmp, "5"
 	case c.IsRepo:
-		icon, color = iconRepo, colorRepo
+		return iconRepo, "2"
 	default:
-		icon, color = iconProject, colorProject
+		return iconProject, "4"
 	}
-	indicator := ""
-	if active {
-		indicator = colorActive + " ●" + colorReset
-	}
-	name := c.RelPath
-	if c.IsTmp {
-		name = colorTmp + c.RelPath + colorReset
-	}
-	return color + icon + colorReset + " " + name + indicator
 }
 
 func LoadTmpCandidates(tmpPath string) []Candidate {
