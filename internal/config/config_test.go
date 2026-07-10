@@ -108,6 +108,24 @@ func TestLoad_tmpPathExplicit(t *testing.T) {
 	}
 }
 
+func TestLoad_layout(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("layout: \"bottom\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Layout != "bottom" {
+		t.Errorf("Layout = %q, want %q", cfg.Layout, "bottom")
+	}
+}
+
 func TestLoad_tmpPathDefault(t *testing.T) {
 	dir := t.TempDir()
 	cache := t.TempDir()

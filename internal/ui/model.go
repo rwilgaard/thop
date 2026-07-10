@@ -113,6 +113,7 @@ type model struct {
 	cleanCursor   int
 	tiClean       textinput.Model
 	inTmux        bool
+	layoutBottom  bool // layout: "bottom" — status bar top, search bar bottom, lists reversed
 	spin          spinner.Model
 	loadingText   string
 	errMsg        string
@@ -155,26 +156,27 @@ func cmdCreateTmp(tmpPath, name string) tea.Cmd {
 	}
 }
 
-func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, tmpPath string, _ config.Colors, inTmux bool) model {
+func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, cfg config.Config, inTmux bool) model {
 	all := make([]baseItem, 0, len(cs))
 	for _, c := range cs {
 		all = append(all, makeBaseItem(c, ts))
 	}
 	m := model{
-		all:         all,
-		normFrec:    normalizeScores(scores),
-		switchOnly:  switchOnly,
-		tmpPath:     tmpPath,
-		selected:    make(map[string]bool),
-		inTmux:      inTmux,
-		spin:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		ctx:         context.Background(),
-		tiQuery:     newTextInput("Search projects…"),
-		tiURL:       newTextInput("https://github.com/owner/repo.git"),
-		tiDest:      newTextInput("Search folders…"),
-		tiCloneName: newTextInput(""),
-		tiClean:     newTextInput("Search…"),
-		tiName:      newTextInput("Name (empty = auto)"),
+		all:          all,
+		normFrec:     normalizeScores(scores),
+		switchOnly:   switchOnly,
+		tmpPath:      cfg.TmpPath,
+		layoutBottom: cfg.Layout == "bottom",
+		selected:     make(map[string]bool),
+		inTmux:       inTmux,
+		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		ctx:          context.Background(),
+		tiQuery:      newTextInput("Search projects…"),
+		tiURL:        newTextInput("https://github.com/owner/repo.git"),
+		tiDest:       newTextInput("Search folders…"),
+		tiCloneName:  newTextInput(""),
+		tiClean:      newTextInput("Search…"),
+		tiName:       newTextInput("Name (empty = auto)"),
 	}
 	_ = m.tiQuery.Focus()
 	m.rebuildFiltered()
@@ -203,11 +205,29 @@ func invalidTmpName(s string) bool {
 	return strings.Contains(s, "/") || strings.Contains(s, "..")
 }
 
+// moveCursor returns cur stepped by delta, clamped to [0, n).
+func moveCursor(cur, delta, n int) int {
+	next := cur + delta
+	if next < 0 || next >= n {
+		return cur
+	}
+	return next
+}
+
+// visualStep maps a visual direction (-1 up, +1 down) to an index delta.
+// Bottom layout renders lists reversed, so the mapping flips.
+func (m model) visualStep(dir int) int {
+	if m.layoutBottom {
+		return -dir
+	}
+	return dir
+}
+
 func (m model) Init() tea.Cmd { return nil }
 
 func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
 	initStyles(cfg)
-	m := newModel(cs, scores, ts, switchOnly, cfg.TmpPath, cfg.Colors, inTmux)
+	m := newModel(cs, scores, ts, switchOnly, cfg, inTmux)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m.ctx = ctx
@@ -224,7 +244,7 @@ func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState
 
 func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
 	initStyles(cfg)
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, cfg.TmpPath, cfg.Colors, inTmux)
+	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, cfg, inTmux)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m.ctx = ctx

@@ -135,13 +135,9 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case key.Matches(msg, keys.Up):
-		if m.cursor > 0 {
-			m.cursor--
-		}
+		m.cursor = moveCursor(m.cursor, m.visualStep(-1), len(m.filtered))
 	case key.Matches(msg, keys.Down):
-		if m.cursor < len(m.filtered)-1 {
-			m.cursor++
-		}
+		m.cursor = moveCursor(m.cursor, m.visualStep(1), len(m.filtered))
 	case key.Matches(msg, keys.All):
 		m.view, m.cursor = viewAll, 0
 		m.rebuildFiltered()
