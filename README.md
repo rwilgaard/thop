@@ -32,6 +32,7 @@ thop ~/projects/myapp  # open a path directly, no picker
 thop clone <url>       # pick a destination and clone
 thop tmp               # create a new tmp project and open it
 thop tmp myname        # create a named tmp project
+thop --version         # print version
 ```
 
 Inside tmux, `thop` opens as a popup. Outside tmux it runs inline.
@@ -54,6 +55,8 @@ Inside tmux, `thop` opens as a popup. Outside tmux it runs inline.
 | `?` | Toggle full keymap |
 | `Esc` / `Ctrl-C` | Quit |
 
+The status bar shows the active filter (`^A All · ^P Projects · ^R Repos · ^T Tmp`) and item count, and switches to mode-specific text during clone/tmp/clean flows.
+
 ### Tmp projects
 
 `Ctrl-N` creates a disposable scratch directory under `tmp_path` and opens it immediately as a tmux session. Projects appear in the picker with a `~` icon.
@@ -70,6 +73,7 @@ paths:
   - ~/work
 
 # tmp_path: ~/scratch  # defaults to ~/.cache/thop/tmp
+# layout: top           # or "bottom": status bar top, search bar bottom, list reversed
 ```
 
 Colors default to your terminal palette. Override with terminal color numbers (`0`–`255`) or hex codes:
@@ -80,6 +84,7 @@ Colors default to your terminal palette. Override with terminal color numbers (`
 #   selection_fg: "15"
 #   active_color: "11"
 #   prompt_color: "11"
+#   match_color: ""       # defaults to prompt_color if unset
 #   status_active_color: "11"
 #   help_key_color: ""
 #   help_desc_color: ""
