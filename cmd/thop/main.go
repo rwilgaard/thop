@@ -64,13 +64,26 @@ func main() {
 		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
 	}
 
+	// Only the TUI paths use the keymap, so validate there (not for direct
+	// open or tmp). Skip in the popup child — the parent already validated
+	// before re-exec, so this also avoids building the keymap twice.
+	validateKeymap := func() {
+		if *popup {
+			return
+		}
+		if err := ui.ValidateKeymap(cfg); err != nil {
+			fatalf("config: %v", err)
+		}
+	}
+
 	if flag.NArg() >= 1 && flag.Arg(0) == "clone" && flag.NArg() != 2 {
 		fatalf("usage: thop clone <url>")
 	}
 
 	if flag.NArg() == 2 && flag.Arg(0) == "clone" {
 		url := flag.Arg(1)
-		if runInPopupIfNeeded(inTmux, *popup) {
+		validateKeymap()
+		if runInPopupIfNeeded(inTmux, *popup, cfg) {
 			return
 		}
 		static, loadErr := candidates.LoadCandidates(cfg.Paths, cacheFile)
@@ -110,7 +123,8 @@ func main() {
 		return
 	}
 
-	if runInPopupIfNeeded(inTmux, *popup) {
+	validateKeymap()
+	if runInPopupIfNeeded(inTmux, *popup, cfg) {
 		return
 	}
 
@@ -179,12 +193,14 @@ func openResult(result ui.Result, cfg config.Config, frecencyFile string, inTmux
 // (caller should return). display-popup -E propagates the inner exit code, so a
 // non-zero ExitError means the inner binary failed — exit with that code. A
 // non-ExitError means popup creation failed (old tmux, etc.) — fall through.
-func runInPopupIfNeeded(inTmux, popup bool) bool {
+func runInPopupIfNeeded(inTmux, popup bool, cfg config.Config) bool {
 	if !inTmux || popup {
 		return false
 	}
-	args := append([]string{"display-popup", "-E", "-w", "60%", "-h", "50%", os.Args[0], "--popup"}, os.Args[1:]...)
-	if err := exec.Command("tmux", args...).Run(); err != nil {
+	args := append([]string{"display-popup", "-E", "-w", cfg.Popup.Width, "-h", cfg.Popup.Height, os.Args[0], "--popup"}, os.Args[1:]...)
+	cmd := exec.Command("tmux", args...)
+	cmd.Stderr = os.Stderr // surface tmux errors (e.g. a bad popup size)
+	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.ExitCode())

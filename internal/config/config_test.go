@@ -146,3 +146,110 @@ func TestLoad_tmpPathDefault(t *testing.T) {
 		t.Errorf("TmpPath = %q, want %q", cfg.TmpPath, want)
 	}
 }
+
+func TestLoad_popupDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(dir, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Popup.Width != "60%" {
+		t.Errorf("Popup.Width = %q, want %q", cfg.Popup.Width, "60%")
+	}
+	if cfg.Popup.Height != "50%" {
+		t.Errorf("Popup.Height = %q, want %q", cfg.Popup.Height, "50%")
+	}
+}
+
+func TestLoad_popupOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "popup:\n  width: \"80%\"\n  height: \"70%\"\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Popup.Width != "80%" {
+		t.Errorf("Popup.Width = %q, want %q", cfg.Popup.Width, "80%")
+	}
+	if cfg.Popup.Height != "70%" {
+		t.Errorf("Popup.Height = %q, want %q", cfg.Popup.Height, "70%")
+	}
+}
+
+func TestLoad_popupEmptyBackfilled(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "popup:\n  width: \"\"\n  height: \"70%\"\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Popup.Width != "60%" {
+		t.Errorf("Popup.Width = %q, want %q (empty falls back to default)", cfg.Popup.Width, "60%")
+	}
+	if cfg.Popup.Height != "70%" {
+		t.Errorf("Popup.Height = %q, want %q", cfg.Popup.Height, "70%")
+	}
+}
+
+func TestLoad_colorsEmptyBackfilled(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit empty overrides a non-empty default; must fall back.
+	content := "colors:\n  status_active_color: \"\"\n  selection_bg: \"\"\n  match_color: \"\"\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Colors.StatusActiveColor != "11" {
+		t.Errorf("StatusActiveColor = %q, want %q (empty falls back)", cfg.Colors.StatusActiveColor, "11")
+	}
+	if cfg.Colors.SelectionBg != "8" {
+		t.Errorf("SelectionBg = %q, want %q (empty falls back)", cfg.Colors.SelectionBg, "8")
+	}
+	// match_color's default is empty, so "" stays "" (no forced fallback).
+	if cfg.Colors.MatchColor != "" {
+		t.Errorf("MatchColor = %q, want empty (its default is empty)", cfg.Colors.MatchColor)
+	}
+}
+
+func TestLoad_keymapOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "thop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "keymap:\n  up: [\"k\"]\n  help: [\"h\"]\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Keymap["up"]; len(got) != 1 || got[0] != "k" {
+		t.Errorf("Keymap[up] = %v, want [k]", got)
+	}
+	if got := cfg.Keymap["help"]; len(got) != 1 || got[0] != "h" {
+		t.Errorf("Keymap[help] = %v, want [h]", got)
+	}
+}

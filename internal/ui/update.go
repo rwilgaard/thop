@@ -110,10 +110,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.showHelp {
-		switch msg.String() {
-		case "ctrl+c":
+		switch {
+		case msg.String() == "ctrl+c":
 			return m, tea.Quit
-		case "?", "esc":
+		case key.Matches(msg, m.keys.Quit) || key.Matches(msg, m.keys.Help):
 			m.showHelp = false
 			return m, m.tiQuery.Focus()
 		}
@@ -121,9 +121,9 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
-	case key.Matches(msg, keys.Quit):
+	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
-	case key.Matches(msg, keys.Enter):
+	case key.Matches(msg, m.keys.Enter):
 		if len(m.filtered) > 0 {
 			c := m.filtered[m.cursor].base.candidate
 			m.result.Candidate = c
@@ -134,33 +134,33 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Quit
-	case key.Matches(msg, keys.Up):
+	case key.Matches(msg, m.keys.Up):
 		m.cursor = moveCursor(m.cursor, m.visualStep(-1), len(m.filtered))
-	case key.Matches(msg, keys.Down):
+	case key.Matches(msg, m.keys.Down):
 		m.cursor = moveCursor(m.cursor, m.visualStep(1), len(m.filtered))
-	case key.Matches(msg, keys.All):
+	case key.Matches(msg, m.keys.All):
 		m.view, m.cursor = viewAll, 0
 		m.rebuildFiltered()
-	case key.Matches(msg, keys.Projects):
+	case key.Matches(msg, m.keys.Projects):
 		m.view, m.cursor = viewProject, 0
 		m.rebuildFiltered()
-	case key.Matches(msg, keys.Repos):
+	case key.Matches(msg, m.keys.Repos):
 		m.view, m.cursor = viewRepo, 0
 		m.rebuildFiltered()
-	case key.Matches(msg, keys.Tmp):
+	case key.Matches(msg, m.keys.Tmp):
 		m.view, m.cursor = viewTmp, 0
 		m.rebuildFiltered()
-	case key.Matches(msg, keys.Clone):
+	case key.Matches(msg, m.keys.Clone):
 		m.tiQuery.Blur()
 		m.inputMode = modeURLInput
 		m.tiURL.SetValue("")
 		return m, m.tiURL.Focus()
-	case key.Matches(msg, keys.NewTmp):
+	case key.Matches(msg, m.keys.NewTmp):
 		m.tiQuery.Blur()
 		m.tiName.SetValue("")
 		m.inputMode = modeNameInput
 		return m, m.tiName.Focus()
-	case key.Matches(msg, keys.CleanTmp):
+	case key.Matches(msg, m.keys.CleanTmp):
 		m.cleanCursor = 0
 		m.selected = make(map[string]bool)
 		m.tiClean.SetValue("")
@@ -168,7 +168,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.tiQuery.Blur()
 		m.inputMode = modeCleanTmp
 		return m, m.tiClean.Focus()
-	case key.Matches(msg, keys.Help):
+	case key.Matches(msg, m.keys.Help):
 		m.tiQuery.Blur()
 		m.showHelp = true
 	default:

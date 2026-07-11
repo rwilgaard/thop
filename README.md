@@ -74,6 +74,10 @@ paths:
 
 # tmp_path: ~/scratch  # defaults to ~/.cache/thop/tmp
 # layout: top           # or "bottom": status bar top, search bar bottom, list reversed
+
+# popup:                # size of the tmux popup thop opens itself in
+#   width: "60%"         # any tmux -w value (percent or fixed cols)
+#   height: "50%"        # any tmux -h value (percent or fixed rows)
 ```
 
 Colors default to your terminal palette. Override with terminal color numbers (`0`–`255`) or hex codes:
@@ -89,6 +93,30 @@ Colors default to your terminal palette. Override with terminal color numbers (`
 #   help_key_color: ""
 #   help_desc_color: ""
 ```
+
+Every keybinding can be remapped. Omit any entry to keep its default:
+
+```yaml
+# keymap:
+#   up: ["up", "ctrl+k"]
+#   down: ["down", "ctrl+j"]
+#   enter: ["enter"]
+#   quit: ["esc", "ctrl+c"]
+#   help: ["?"]
+#   clone: ["ctrl+g"]
+#   newtmp: ["ctrl+n"]
+#   cleantmp: ["ctrl+x"]
+#   all: ["ctrl+a"]
+#   projects: ["ctrl+p"]
+#   repos: ["ctrl+r"]
+#   tmp: ["ctrl+t"]
+```
+
+Binding a plain character (like `k`) makes it untypeable in the search field, so stick to modifier keys for anything you'd also want to type. Binding the same key to two actions is rejected at startup.
+
+Terminals send `ctrl+i`, `ctrl+m` and `ctrl+[` as `tab`, `enter` and `esc`, so thop binds both spellings: `clone: ["ctrl+i"]` also triggers on tab.
+
+`alt+<key>`, `shift+<named key>` (like `shift+tab`) and function keys work everywhere. Combos like `ctrl+shift+x` need the enhanced keyboard protocol: a terminal that supports it (kitty, ghostty, WezTerm, recent iTerm2) and `set -s extended-keys on` in your tmux config. Without it the key degrades to plain `ctrl+x`. Modifiers must be spelled in the order `ctrl`, `alt`, `shift`, with a lowercase letter.
 
 ## How it works
 

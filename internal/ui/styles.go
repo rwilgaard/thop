@@ -17,7 +17,8 @@ var (
 	stylePrompt         lipgloss.Style
 	styleSelected       lipgloss.Style
 	styleSelectedActive lipgloss.Style
-	styleStatusActive   lipgloss.Style
+	styleStatusPill     lipgloss.Style
+	styleFilterActive   lipgloss.Style
 	styleDimActive      lipgloss.Style
 	styleTmpName        lipgloss.Style
 	styleMatch          lipgloss.Style
@@ -31,7 +32,8 @@ func initStyles(cfg config.Config) {
 	stylePrompt = lipgloss.NewStyle().Foreground(lipgloss.Color(c.PromptColor)).Bold(true)
 	styleSelected = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
 	styleSelectedActive = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.ActiveColor)).Bold(true)
-	styleStatusActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.StatusActiveColor)).Bold(true)
+	styleStatusPill = lipgloss.NewStyle().Background(lipgloss.Color(c.StatusActiveColor)).Foreground(lipgloss.Color("0")).Bold(true)
+	styleFilterActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
 	styleDimActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.ActiveColor))
 	styleTmpName = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	match := c.MatchColor
@@ -50,10 +52,14 @@ func initStyles(cfg config.Config) {
 	}
 }
 
+// bracketKey wraps a key name in the "<key>" hint form used across the status
+// and search rows. Single source of the bracket convention (see spelledKey).
+func bracketKey(s string) string { return "<" + s + ">" }
+
 func keyHints(pairs [][2]string) string {
 	var parts []string
 	for _, p := range pairs {
-		key := stylePrompt.Render("<" + p[0] + ">")
+		key := stylePrompt.Render(bracketKey(p[0]))
 		action := styleSep.Render(p[1])
 		parts = append(parts, key+" "+action)
 	}
