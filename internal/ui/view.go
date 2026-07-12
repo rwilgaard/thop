@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
@@ -177,9 +178,9 @@ func joinCols(cols []string, gap string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-func renderHelpOverlay(width int) string {
-	cols := make([]string, 0, len(helpGroups))
-	for _, g := range helpGroups {
+func renderHelpOverlay(width int, groups []helpGroup) string {
+	cols := make([]string, 0, len(groups))
+	for _, g := range groups {
 		maxKey := 0
 		for _, b := range g.keys {
 			maxKey = max(maxKey, lipgloss.Width(b.Help().Key))
@@ -252,7 +253,11 @@ func (m model) searchLine(width int) string {
 		if m.showHelp {
 			return leftPad + label + tiView
 		}
-		hints := keyHints([][2]string{{"enter", "Open"}, {"ctrl-g", "Clone"}, {"?", "Help"}})
+		hints := keyHints([][2]string{
+			{m.keys.Enter.Help().Key, "Open"},
+			{m.keys.Clone.Help().Key, "Clone"},
+			{m.keys.Help.Help().Key, "Help"},
+		})
 		return inputRow(label, tiView, hints, width)
 	}
 }
@@ -273,7 +278,7 @@ func (m model) bodyLines(width, maxRows int) []string {
 		return lines
 	case m.showHelp:
 		var lines []string
-		for _, line := range strings.Split(renderHelpOverlay(width), "\n") {
+		for _, line := range strings.Split(renderHelpOverlay(width, buildHelpGroups(m.keys)), "\n") {
 			lines = append(lines, leftPad+line)
 		}
 		return lines
@@ -357,69 +362,106 @@ func (m model) View() tea.View {
 		sb.WriteByte('\n')
 	}
 	if m.layoutBottom {
-		writeLine(m.statusBar(width))
+		writeLine(clampWidth(m.statusBar(width), width))
 		writeLine(sepLine)
 		for _, l := range body {
 			writeLine(l)
 		}
 		writeLine(sepLine)
 		// no trailing newline: would scroll the terminal, shifting the frame
-		sb.WriteString(m.searchLine(width))
+		sb.WriteString(clampWidth(m.searchLine(width), width))
 	} else {
-		writeLine(m.searchLine(width))
+		writeLine(clampWidth(m.searchLine(width), width))
 		writeLine(sepLine)
 		for _, l := range body {
 			writeLine(l)
 		}
 		writeLine(sepLine)
 		// no trailing newline: would scroll the terminal, shifting the frame
-		sb.WriteString(m.statusBar(width))
+		sb.WriteString(clampWidth(m.statusBar(width), width))
 	}
 	return tea.NewView(sb.String())
+}
+
+// modePill renders the current mode name as a filled badge for the status bar.
+func modePill(label string) string {
+	return styleStatusPill.Render(" " + label + " ")
+}
+
+// clampWidth truncates a status/search line so it can never exceed the frame
+// width and wrap to a second row, which would scroll the layout.
+func clampWidth(line string, width int) string {
+	return lipgloss.NewStyle().MaxWidth(width).Render(line)
+}
+
+// spelledKey returns a binding's bracketed help-key token ("<ctrl-a>"),
+// matching the other hint rows. caretLabel (keymap.go) is the bare compact
+// fallback ("^A") used when the spelled form would overflow the bar.
+func spelledKey(b key.Binding) string { return bracketKey(b.Help().Key) }
+
+type filterTab struct {
+	binding key.Binding
+	label   string
+	mode    viewMode
+}
+
+func (m model) filterTabList() []filterTab {
+	return []filterTab{
+		{m.keys.All, "All", viewAll},
+		{m.keys.Projects, "Projects", viewProject},
+		{m.keys.Repos, "Repos", viewRepo},
+		{m.keys.Tmp, "Tmp", viewTmp},
+	}
+}
+
+// filterTabs renders the view-filter segments, formatting each key token via
+// keyFn and joining them with sep. The active filter's label is colored text.
+func (m model) filterTabs(keyFn func(key.Binding) string, sep string) string {
+	var sb strings.Builder
+	for i, t := range m.filterTabList() {
+		if i > 0 {
+			sb.WriteString(sep)
+		}
+		sb.WriteString(stylePrompt.Render(keyFn(t.binding)))
+		sb.WriteString(" ")
+		// Active filter is just colored text — no background pill. Bare labels
+		// keep active and inactive the same width, so nothing shifts on switch.
+		if m.view == t.mode {
+			sb.WriteString(styleFilterActive.Render(t.label))
+		} else {
+			sb.WriteString(styleSep.Render(t.label))
+		}
+	}
+	return sb.String()
 }
 
 func (m model) statusBar(width int) string {
 	var left, right string
 	switch m.inputMode {
 	case modeDestPicker:
-		left = styleSep.Render("Clone: " + m.tiURL.Value())
+		left = modePill("Clone") + "  " + styleSep.Render(m.tiURL.Value())
 		right = styleSep.Render(fmt.Sprintf("%d items", len(m.destFiltered)))
 	case modeCleanTmp, modeConfirmClean:
-		left = styleSep.Render(fmt.Sprintf("%d selected", len(m.selected)))
+		left = modePill("Clean") + "  " + styleSep.Render(fmt.Sprintf("%d selected", len(m.selected)))
 		right = styleSep.Render(fmt.Sprintf("%d items", len(m.cleanFiltered)))
 	case modeURLInput, modeCloneName:
-		left = styleSep.Render("Clone")
+		left = modePill("Clone")
 	case modeNameInput:
-		left = styleSep.Render("New tmp")
+		left = modePill("New tmp")
 	case modeLoading:
 		left = styleSep.Render(m.loadingText)
 	case modeError:
-		left = styleSep.Render("Error")
+		left = modePill("Error")
 	default:
-		var sb strings.Builder
-		viewLabels := []struct {
-			key   string
-			label string
-			mode  viewMode
-		}{
-			{"^A", "All", viewAll},
-			{"^P", "Projects", viewProject},
-			{"^R", "Repos", viewRepo},
-			{"^T", "Tmp", viewTmp},
-		}
-		for i, v := range viewLabels {
-			if i > 0 {
-				sb.WriteString(styleSep.Render(" · "))
-			}
-			sb.WriteString(styleSep.Render(v.key + " "))
-			if m.view == v.mode {
-				sb.WriteString(styleStatusActive.Render("● " + v.label))
-			} else {
-				sb.WriteString(styleSep.Render(v.label))
-			}
-		}
-		left = sb.String()
 		right = styleSep.Render(fmt.Sprintf("%d items", len(m.filtered)))
+		badge := modePill("Filter") + "  "
+		// Prefer spelled keys (<ctrl-a>) with bullet separators to match the
+		// other hint rows; fall back to compact carets (^A) when the row
+		// would overflow.
+		left = badge + m.filterTabs(spelledKey, styleSep.Render(" • "))
+		if lipgloss.Width(left)+lipgloss.Width(right) > width-2 {
+			left = badge + m.filterTabs(caretLabel, "  ")
+		}
 	}
 	pad := max(1, width-2-lipgloss.Width(left)-lipgloss.Width(right))
 	// no trailing newline: would scroll the terminal, shifting the search bar off screen

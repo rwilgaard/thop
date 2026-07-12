@@ -114,6 +114,7 @@ type model struct {
 	tiClean       textinput.Model
 	inTmux        bool
 	layoutBottom  bool // layout: "bottom" — status bar top, search bar bottom, lists reversed
+	keys          keyMap
 	spin          spinner.Model
 	loadingText   string
 	errMsg        string
@@ -167,6 +168,7 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Tmux
 		switchOnly:   switchOnly,
 		tmpPath:      cfg.TmpPath,
 		layoutBottom: cfg.Layout == "bottom",
+		keys:         buildKeyMap(cfg),
 		selected:     make(map[string]bool),
 		inTmux:       inTmux,
 		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),

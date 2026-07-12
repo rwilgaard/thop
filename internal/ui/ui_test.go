@@ -235,7 +235,8 @@ func TestView(t *testing.T) {
 		{"", "repo icon"},
 		{"󰉋", "project icon"},
 		{"● open", "active indicator"},
-		{"● All", "status bar active view"},
+		{"Filter", "status bar filter heading"},
+		{"All", "status bar active view"},
 		{"items", "item count"},
 	}
 	for _, c := range checks {
@@ -848,26 +849,53 @@ func TestNormalMode_hints(t *testing.T) {
 }
 
 func TestStatusBar_modes(t *testing.T) {
+	initStyles(config.Config{})
 	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
-	// normal: tabs with keys + count
+	// normal, wide: spelled+bracketed keys with dot separators, matching the
+	// other hint rows
 	out := m.View().Content
-	for _, w := range []string{"^A", "● All", "^P", "Projects", "^R", "Repos", "^T", "Tmp", "0 items"} {
+	for _, w := range []string{"Filter", "<ctrl-a>", "All", "<ctrl-p>", "Projects", "<ctrl-r>", "Repos", "<ctrl-t>", "Tmp", "•", "0 items"} {
 		if !strings.Contains(out, w) {
-			t.Errorf("normal mode status missing %q: %q", w, out)
+			t.Errorf("wide normal status missing %q: %q", w, out)
 		}
 	}
+
+	// normal, narrow: falls back to compact bare carets, no dots, so it fits
+	m.width = 60
+	narrow := m.View().Content
+	if !strings.Contains(narrow, "^A") || strings.Contains(narrow, "<ctrl-a>") || strings.Contains(narrow, "•") {
+		t.Errorf("narrow normal status should use compact caret fallback: %q", narrow)
+	}
+	for _, line := range strings.Split(narrow, "\n") {
+		if lipgloss.Width(line) > 60 {
+			t.Errorf("narrow status line exceeds width 60 (got %d): %q", lipgloss.Width(line), line)
+		}
+	}
+	m.width = 100
+
+	// the active filter must render distinctly from inactive ones: switching
+	// the active view changes the bar. Guards against every label rendering
+	// the same (dropping the m.view==t.mode branch).
+	m.view = viewAll
+	allActive := m.View().Content
+	m.view = viewProject
+	projActive := m.View().Content
+	if allActive == projActive {
+		t.Error("active filter not styled distinctly: switching active view produced identical output")
+	}
+	m.view = viewAll
 
 	// dest picker: clone URL + own count, no tabs
 	m.inputMode = modeDestPicker
 	m.tiURL.SetValue("https://x/y.git")
 	m.rebuildDestFiltered()
 	out = m.View().Content
-	if !strings.Contains(out, "Clone: https://x/y.git") {
+	if !strings.Contains(out, "https://x/y.git") {
 		t.Errorf("dest picker should show clone URL: %q", out)
 	}
-	if strings.Contains(out, "● All") {
+	if strings.Contains(out, "Projects") {
 		t.Errorf("dest picker should not show view tabs: %q", out)
 	}
 
@@ -903,7 +931,7 @@ func TestLayoutBottom_frame(t *testing.T) {
 	m.width, m.height, m.ready = 80, 24, true
 
 	lines := strings.Split(m.View().Content, "\n")
-	if !strings.Contains(lines[0], "● All") {
+	if !strings.Contains(lines[0], "Filter") {
 		t.Errorf("bottom layout: first line should be status bar, got %q", lines[0])
 	}
 	if !strings.Contains(lines[len(lines)-1], "❯") {

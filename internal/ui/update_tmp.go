@@ -6,19 +6,20 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
 
 func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	switch {
+	case msg.String() == "ctrl+c":
 		return m, tea.Quit
-	case "esc":
+	case msg.String() == "esc":
 		m.tiName.Blur()
 		m.nameConflict = false
 		m.inputMode = modeNormal
 		return m, m.tiQuery.Focus()
-	case "enter":
+	case key.Matches(msg, m.keys.Enter):
 		name := m.tiName.Value()
 		if invalidTmpName(name) {
 			m.nameConflict = true
@@ -50,19 +51,19 @@ func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	switch {
+	case msg.String() == "ctrl+c":
 		return m, tea.Quit
-	case "esc":
+	case msg.String() == "esc":
 		m.tiClean.Blur()
 		m.inputMode = modeNormal
 		m.selected = make(map[string]bool)
 		return m, m.tiQuery.Focus()
-	case "up", "ctrl+k":
+	case key.Matches(msg, m.keys.Up):
 		m.cleanCursor = moveCursor(m.cleanCursor, m.visualStep(-1), len(m.cleanFiltered))
-	case "down", "ctrl+j":
+	case key.Matches(msg, m.keys.Down):
 		m.cleanCursor = moveCursor(m.cleanCursor, m.visualStep(1), len(m.cleanFiltered))
-	case "space":
+	case msg.String() == "space":
 		if m.cleanCursor < len(m.cleanFiltered) {
 			path := m.cleanFiltered[m.cleanCursor].base.candidate.AbsPath
 			if m.selected[path] {
@@ -71,7 +72,7 @@ func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.selected[path] = true
 			}
 		}
-	case "enter":
+	case key.Matches(msg, m.keys.Enter):
 		if len(m.tmpItems()) > 0 {
 			m.tiClean.Blur()
 			m.inputMode = modeConfirmClean

@@ -4,18 +4,19 @@ import (
 	"os"
 	"path/filepath"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rwilgaard/thop/internal/git"
 )
 
 func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.tiURL.Blur()
 		m.tiURL.SetValue("")
 		m.inputMode = modeNormal
 		return m, m.tiQuery.Focus()
-	case "enter":
+	case key.Matches(msg, m.keys.Enter):
 		if m.tiURL.Value() != "" {
 			m.tiURL.Blur()
 			m.tiDest.SetValue("")
@@ -33,12 +34,12 @@ func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.tiDest.Blur()
 		m.inputMode = modeURLInput
 		return m, m.tiURL.Focus()
-	case "enter":
+	case key.Matches(msg, m.keys.Enter):
 		if m.destCursor < len(m.destFiltered) {
 			chosen := m.destFiltered[m.destCursor].base.candidate.AbsPath
 			name := git.RepoNameFromURL(m.tiURL.Value())
@@ -57,9 +58,9 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmdClone(m.ctx, m.tiURL.Value(), fullDest), m.spin.Tick)
 		}
 		return m, tea.Quit
-	case "up", "ctrl+k":
+	case key.Matches(msg, m.keys.Up):
 		m.destCursor = moveCursor(m.destCursor, m.visualStep(-1), len(m.destFiltered))
-	case "down", "ctrl+j":
+	case key.Matches(msg, m.keys.Down):
 		m.destCursor = moveCursor(m.destCursor, m.visualStep(1), len(m.destFiltered))
 	default:
 		prev := m.tiDest.Value()
@@ -75,12 +76,12 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case msg.String() == "esc":
 		m.tiCloneName.Blur()
 		m.inputMode = modeDestPicker
 		return m, m.tiDest.Focus()
-	case "enter":
+	case key.Matches(msg, m.keys.Enter):
 		if m.tiCloneName.Value() != "" {
 			dest := filepath.Join(m.cloneDestDir, m.tiCloneName.Value())
 			m.result.Clone = &CloneRequest{
