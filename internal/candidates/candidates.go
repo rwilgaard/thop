@@ -3,15 +3,13 @@ package candidates
 import (
 	"bufio"
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
-)
 
-const (
-	iconProject = "󰉋"
-	iconRepo    = ""
-	iconTmp     = "~"
+	"charm.land/lipgloss/v2"
+	"github.com/rwilgaard/thop/internal/config"
 )
 
 // Candidate is a project directory or git repository openable as a tmux session.
@@ -229,15 +227,16 @@ func CandidateActive(c Candidate, sessions, windows map[string]bool) bool {
 	return sessions[sessionize(c.RelPath)]
 }
 
-// Icon returns the type glyph and its ANSI-256 color for a candidate.
-func Icon(c Candidate) (string, string) {
+// Icon returns the type glyph and its color for a candidate.
+// Glyphs come from config; colors stay fixed per type.
+func Icon(c Candidate, ic config.Icons) (string, color.Color) {
 	switch {
 	case c.IsTmp:
-		return iconTmp, "5"
+		return ic.Tmp, lipgloss.Magenta
 	case c.IsRepo:
-		return iconRepo, "2"
+		return ic.Repo, lipgloss.Green
 	default:
-		return iconProject, "4"
+		return ic.Project, lipgloss.Blue
 	}
 }
 
