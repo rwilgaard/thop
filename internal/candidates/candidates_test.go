@@ -1,9 +1,13 @@
 package candidates
 
 import (
+	"image/color"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"charm.land/lipgloss/v2"
+	"github.com/rwilgaard/thop/internal/config"
 )
 
 func TestSessionize(t *testing.T) {
@@ -69,21 +73,22 @@ func TestCandidateActive(t *testing.T) {
 }
 
 func TestIcon(t *testing.T) {
+	ic := config.Icons{Project: "P", Repo: "R", Tmp: "T"}
 	tests := []struct {
 		name      string
 		c         Candidate
 		wantGlyph string
-		wantColor string
+		wantColor color.Color
 	}{
-		{"project", Candidate{}, "󰉋", "4"},
-		{"repo", Candidate{IsRepo: true}, "", "2"},
-		{"tmp", Candidate{IsTmp: true}, "~", "5"},
+		{"project", Candidate{}, "P", lipgloss.Blue},
+		{"repo", Candidate{IsRepo: true}, "R", lipgloss.Green},
+		{"tmp", Candidate{IsTmp: true}, "T", lipgloss.Magenta},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			glyph, color := Icon(tt.c)
-			if glyph != tt.wantGlyph || color != tt.wantColor {
-				t.Errorf("Icon() = %q,%q want %q,%q", glyph, color, tt.wantGlyph, tt.wantColor)
+			glyph, col := Icon(tt.c, ic)
+			if glyph != tt.wantGlyph || col != tt.wantColor {
+				t.Errorf("Icon() = %q,%v want %q,%v", glyph, col, tt.wantGlyph, tt.wantColor)
 			}
 		})
 	}

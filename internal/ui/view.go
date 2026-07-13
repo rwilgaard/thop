@@ -118,14 +118,14 @@ func renderName(name string, matches []int, base, match lipgloss.Style) string {
 
 func renderRow(row listRow, isCursor bool, o listOpts) string {
 	c := row.item.candidate
-	glyph, glyphColor := candidates.Icon(c)
+	glyph, glyphColor := candidates.Icon(c, icons)
 
 	prefix := leftPad
 	if o.selected != nil && o.selected[c.AbsPath] {
-		prefix = "✓"
+		prefix = glyphSelect
 	}
 
-	iconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(glyphColor))
+	iconStyle := lipgloss.NewStyle().Foreground(glyphColor)
 	nameStyle := lipgloss.NewStyle()
 	if c.IsTmp {
 		nameStyle = styleTmpName
@@ -210,14 +210,14 @@ func (m model) searchLine(width int) string {
 		return leftPad + m.spin.View() + " " + styleSep.Render(m.loadingText)
 	case modeError:
 		hints := keyHints([][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}})
-		label := styleSep.Render("⚠  ")
+		label := styleSep.Render(glyphWarning + "  ")
 		return inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
 	case modeURLInput:
 		hints := keyHints([][2]string{{"enter", "Clone"}, {"esc", "Cancel"}})
-		return inputRow(stylePrompt.Render("Clone repository ❯ "), m.tiURL.View(), hints, width)
+		return inputRow(stylePrompt.Render("Clone repository "+glyphPrompt+" "), m.tiURL.View(), hints, width)
 	case modeNameInput:
 		hints := keyHints([][2]string{{"enter", "Create"}, {"esc", "Cancel"}})
-		label := stylePrompt.Render("New tmp project ❯ ")
+		label := stylePrompt.Render("New tmp project " + glyphPrompt + " ")
 		tiView := m.tiName.View()
 		var hint string
 		switch {
@@ -229,7 +229,7 @@ func (m model) searchLine(width int) string {
 		return inputRow(label, tiView+hint, hints, width)
 	case modeCleanTmp:
 		hints := keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
-		return inputRow(stylePrompt.Render("Delete tmp projects ❯ "), m.tiClean.View(), hints, width)
+		return inputRow(stylePrompt.Render("Delete tmp projects "+glyphPrompt+" "), m.tiClean.View(), hints, width)
 	case modeConfirmClean:
 		n := len(m.selected)
 		if n == 0 {
@@ -243,12 +243,12 @@ func (m model) searchLine(width int) string {
 		return leftPad + stylePrompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
 	case modeDestPicker:
 		hints := keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
-		return inputRow(stylePrompt.Render("Clone › Destination ❯ "), m.tiDest.View(), hints, width)
+		return inputRow(stylePrompt.Render("Clone › Destination "+glyphPrompt+" "), m.tiDest.View(), hints, width)
 	case modeCloneName:
 		hints := keyHints([][2]string{{"enter", "Clone as"}, {"esc", "Back"}})
-		return inputRow(stylePrompt.Render("Clone › Name conflict ❯ "), m.tiCloneName.View(), hints, width)
+		return inputRow(stylePrompt.Render("Clone › Name conflict "+glyphPrompt+" "), m.tiCloneName.View(), hints, width)
 	default:
-		label := stylePrompt.Render("❯ ")
+		label := stylePrompt.Render(glyphPrompt + " ")
 		tiView := m.tiQuery.View()
 		if m.showHelp {
 			return leftPad + label + tiView
@@ -284,7 +284,7 @@ func (m model) bodyLines(width, maxRows int) []string {
 		return lines
 	case m.inputMode == modeCloneName:
 		conflict := filepath.Join(m.cloneDestDir, git.RepoNameFromURL(m.tiURL.Value()))
-		return []string{leftPad + styleSep.Render("⚠ Already exists: "+conflict)}
+		return []string{leftPad + styleSep.Render(glyphWarning+" Already exists: "+conflict)}
 	case m.inputMode == modeCleanTmp:
 		rows := make([]listRow, len(m.cleanFiltered))
 		for i, it := range m.cleanFiltered {
@@ -354,7 +354,7 @@ func (m model) View() tea.View {
 	// height budget: search + top-sep + bottom-sep + status = 4
 	maxRows := max(5, height-4)
 	body := fillRows(m.bodyLines(width, maxRows), maxRows, m.layoutBottom)
-	sepLine := leftPad + styleSep.Render(strings.Repeat("─", max(0, width-2)))
+	sepLine := leftPad + styleSep.Render(strings.Repeat(glyphSep, max(0, width-2)))
 
 	var sb strings.Builder
 	writeLine := func(l string) {

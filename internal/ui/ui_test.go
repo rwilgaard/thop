@@ -208,6 +208,7 @@ func TestRebuildFiltered(t *testing.T) {
 }
 
 func TestView(t *testing.T) {
+	initStyles(config.Config{})
 	cs := []cand.Candidate{
 		{AbsPath: "/p/golang/foo", RelPath: "golang/foo", IsRepo: true},
 		{AbsPath: "/p/work", RelPath: "work", IsRepo: false},
@@ -795,6 +796,7 @@ func TestPlaceholders(t *testing.T) {
 }
 
 func TestPrompts_modes(t *testing.T) {
+	initStyles(config.Config{})
 	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 

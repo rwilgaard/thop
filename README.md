@@ -114,6 +114,20 @@ Every keybinding can be remapped. Omit any entry to keep its default:
 
 Binding a plain character (like `k`) makes it untypeable in the search field, so stick to modifier keys for anything you'd also want to type. Binding the same key to two actions is rejected at startup.
 
+Icons default to Nerd Font glyphs. Override any of them (use plain ASCII if your font lacks the glyphs). Omit an entry to keep its default:
+
+```yaml
+# icons:
+#   project: ""    # project dir icon
+#   repo: ""       # git repo icon
+#   tmp: "~"       # tmp project icon
+#   prompt: ">"    # search/input prompt glyph
+#   active: "*"    # open-session indicator
+#   selected: "x"  # multi-select check mark
+#   warning: "!"   # warning glyph
+#   separator: "-" # horizontal rule rune
+```
+
 Terminals send `ctrl+i`, `ctrl+m` and `ctrl+[` as `tab`, `enter` and `esc`, so thop binds both spellings: `clone: ["ctrl+i"]` also triggers on tab.
 
 `alt+<key>`, `shift+<named key>` (like `shift+tab`) and function keys work everywhere. Combos like `ctrl+shift+x` need the enhanced keyboard protocol: a terminal that supports it (kitty, ghostty, WezTerm, recent iTerm2) and `set -s extended-keys on` in your tmux config. Without it the key degrades to plain `ctrl+x`. Modifiers must be spelled in the order `ctrl`, `alt`, `shift`, with a lowercase letter.

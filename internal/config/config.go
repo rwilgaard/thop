@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,17 @@ type Popup struct {
 	Height string `yaml:"height"`
 }
 
+type Icons struct {
+	Project   string `yaml:"project"`
+	Repo      string `yaml:"repo"`
+	Tmp       string `yaml:"tmp"`
+	Prompt    string `yaml:"prompt"`
+	Active    string `yaml:"active"`
+	Selected  string `yaml:"selected"`
+	Warning   string `yaml:"warning"`
+	Separator string `yaml:"separator"`
+}
+
 type Config struct {
 	Paths   []string            `yaml:"paths"`
 	TmpPath string              `yaml:"tmp_path"`
@@ -32,7 +44,19 @@ type Config struct {
 	Popup   Popup               `yaml:"popup"`
 	Keymap  map[string][]string `yaml:"keymap"`
 	Colors  Colors              `yaml:"colors"`
+	Icons   Icons               `yaml:"icons"`
 }
+
+const (
+	defIconProject   = "󰉋"
+	defIconRepo      = ""
+	defIconTmp       = "~"
+	defIconPrompt    = "❯"
+	defIconActive    = "●"
+	defIconSelected  = "✓"
+	defIconWarning   = "⚠"
+	defIconSeparator = "─"
+)
 
 func defaultConfig() Config {
 	return Config{
@@ -41,11 +65,21 @@ func defaultConfig() Config {
 			Height: "50%",
 		},
 		Colors: Colors{
-			SelectionBg:       "8",
-			SelectionFg:       "15",
-			ActiveColor:       "11",
-			PromptColor:       "11",
-			StatusActiveColor: "11",
+			SelectionBg:       ansiCode(lipgloss.BrightBlack),
+			SelectionFg:       ansiCode(lipgloss.BrightWhite),
+			ActiveColor:       ansiCode(lipgloss.BrightYellow),
+			PromptColor:       ansiCode(lipgloss.BrightYellow),
+			StatusActiveColor: ansiCode(lipgloss.BrightYellow),
+		},
+		Icons: Icons{
+			Project:   defIconProject,
+			Repo:      defIconRepo,
+			Tmp:       defIconTmp,
+			Prompt:    defIconPrompt,
+			Active:    defIconActive,
+			Selected:  defIconSelected,
+			Warning:   defIconWarning,
+			Separator: defIconSeparator,
 		},
 	}
 }
@@ -98,6 +132,17 @@ paths:
 #   status_active_color: "11" # mode badge background (Filter/Clone/…)
 #   help_key_color: ""         # help key text (default: terminal bold)
 #   help_desc_color: ""        # help description text (default: terminal faint)
+
+# Override UI glyphs. Omit any to keep its default (Nerd Font icons).
+# icons:
+#   project: ""    # project dir icon
+#   repo: ""       # git repo icon
+#   tmp: "~"       # tmp project icon
+#   prompt: ">"    # search/input prompt glyph
+#   active: "*"    # open-session indicator
+#   selected: "x"  # multi-select check mark
+#   warning: "!"   # warning glyph
+#   separator: "-" # horizontal rule rune
 `
 
 // Load reads config.yaml, falling back to defaults. A non-nil error means the
@@ -148,8 +193,24 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	cfg.Colors.StatusActiveColor = orDefault(cfg.Colors.StatusActiveColor, def.Colors.StatusActiveColor)
 	cfg.Colors.HelpKeyColor = orDefault(cfg.Colors.HelpKeyColor, def.Colors.HelpKeyColor)
 	cfg.Colors.HelpDescColor = orDefault(cfg.Colors.HelpDescColor, def.Colors.HelpDescColor)
+	cfg.Icons.Project = orDefault(cfg.Icons.Project, def.Icons.Project)
+	cfg.Icons.Repo = orDefault(cfg.Icons.Repo, def.Icons.Repo)
+	cfg.Icons.Tmp = orDefault(cfg.Icons.Tmp, def.Icons.Tmp)
+	cfg.Icons.Prompt = orDefault(cfg.Icons.Prompt, def.Icons.Prompt)
+	cfg.Icons.Active = orDefault(cfg.Icons.Active, def.Icons.Active)
+	cfg.Icons.Selected = orDefault(cfg.Icons.Selected, def.Icons.Selected)
+	cfg.Icons.Warning = orDefault(cfg.Icons.Warning, def.Icons.Warning)
+	cfg.Icons.Separator = orDefault(cfg.Icons.Separator, def.Icons.Separator)
 	return cfg, nil
 }
+
+// DefaultIcons returns the built-in icon glyphs. Load backfills these for any
+// omitted key; callers that build a Config directly (e.g. tests) can use them.
+func DefaultIcons() Icons { return defaultConfig().Icons }
+
+// ansiCode renders a lipgloss 4-bit color constant (ansi.BasicColor, ~uint8) as
+// the string form the Colors fields expect: lipgloss.BrightBlack -> "8".
+func ansiCode[T ~uint8](c T) string { return fmt.Sprint(uint8(c)) }
 
 // orDefault returns v, or def when v is empty.
 func orDefault(v, def string) string {
