@@ -3,13 +3,15 @@ package candidates
 import (
 	"bufio"
 	"fmt"
-	"image/color"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
-	"charm.land/lipgloss/v2"
-	"github.com/rwilgaard/thop/internal/config"
+	"github.com/rwilgaard/thop/internal/atomicfile"
+	"github.com/rwilgaard/thop/internal/tmux"
 )
 
 // Candidate is a project directory or git repository openable as a tmux session.
@@ -33,13 +35,24 @@ func LoadCandidates(roots []string, cacheFile string) ([]Candidate, error) {
 	return rebuildCache(roots, cacheFile)
 }
 
-func sessionize(name string) string {
-	return strings.ReplaceAll(name, ".", "_")
-}
-
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// childDirs returns path's entries that are directories; nil on read error.
+func childDirs(path string) []os.DirEntry {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil
+	}
+	dirs := entries[:0]
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e)
+		}
+	}
+	return dirs
 }
 
 // cacheStale checks 2 levels below each root (matching rebuildCache scan depth).
@@ -49,33 +62,21 @@ func cacheStale(roots []string, cacheFile string) bool {
 		return true
 	}
 	cacheTime := info.ModTime()
+	newer := func(e os.DirEntry) bool {
+		fi, err := e.Info()
+		return err != nil || fi.ModTime().After(cacheTime)
+	}
 
 	for _, root := range roots {
 		if di, err := os.Stat(root); err != nil || di.ModTime().After(cacheTime) {
 			return true
 		}
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			if fi, err := e.Info(); err != nil || fi.ModTime().After(cacheTime) {
+		for _, e := range childDirs(root) {
+			if newer(e) {
 				return true
 			}
-			subs, err := os.ReadDir(filepath.Join(root, e.Name()))
-			if err != nil {
-				continue
-			}
-			for _, s := range subs {
-				if !s.IsDir() {
-					continue
-				}
-				if fi, err := s.Info(); err != nil || fi.ModTime().After(cacheTime) {
-					return true
-				}
+			if slices.ContainsFunc(childDirs(filepath.Join(root, e.Name())), newer) {
+				return true
 			}
 		}
 	}
@@ -98,14 +99,7 @@ func rebuildCache(roots []string, cacheFile string) ([]Candidate, error) {
 			continue
 		}
 
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
+		for _, e := range childDirs(root) {
 			name := e.Name()
 			absPath := filepath.Join(root, name)
 			isRepo := pathExists(filepath.Join(absPath, ".git"))
@@ -113,14 +107,7 @@ func rebuildCache(roots []string, cacheFile string) ([]Candidate, error) {
 			if isRepo {
 				continue
 			}
-			subs, err := os.ReadDir(absPath)
-			if err != nil {
-				continue
-			}
-			for _, s := range subs {
-				if !s.IsDir() {
-					continue
-				}
+			for _, s := range childDirs(absPath) {
 				d2 := filepath.Join(absPath, s.Name())
 				if pathExists(filepath.Join(d2, ".git")) {
 					cands = append(cands, Candidate{
@@ -144,30 +131,17 @@ func writeCache(cacheFile string, roots []string, cands []Candidate) error {
 	if err := os.MkdirAll(filepath.Dir(cacheFile), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(cacheFile), "candidates-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-
-	w := bufio.NewWriter(tmp)
-	_, _ = fmt.Fprintf(w, "#%s\n", strings.Join(roots, "\t"))
-	for _, c := range cands {
-		isRepo := "0"
-		if c.IsRepo {
-			isRepo = "1"
+	return atomicfile.Write(cacheFile, func(w io.Writer) error {
+		_, _ = fmt.Fprintf(w, "#%s\n", strings.Join(roots, "\t"))
+		for _, c := range cands {
+			isRepo := "0"
+			if c.IsRepo {
+				isRepo = "1"
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", c.AbsPath, c.Root, isRepo)
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", c.AbsPath, c.Root, isRepo)
-	}
-	if err := w.Flush(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, cacheFile)
+		return nil
+	})
 }
 
 func readCache(cacheFile string, roots []string) ([]Candidate, error) {
@@ -217,30 +191,28 @@ func readCache(cacheFile string, roots []string) ([]Candidate, error) {
 	return out, sc.Err()
 }
 
-// CandidateActive reports whether c corresponds to an open tmux session or window.
-func CandidateActive(c Candidate, sessions, windows map[string]bool) bool {
+// Active reports whether c corresponds to an open tmux session or window.
+func Active(c Candidate, ts tmux.State) bool {
 	if strings.Contains(c.RelPath, "/") {
-		parent := sessionize(strings.SplitN(c.RelPath, "/", 2)[0])
+		parent := tmux.Sessionize(strings.SplitN(c.RelPath, "/", 2)[0])
 		window := filepath.Base(c.AbsPath)
-		return windows[parent+"/"+window]
+		return ts.Windows[parent+"/"+window]
 	}
-	return sessions[sessionize(c.RelPath)]
+	return ts.Sessions[tmux.Sessionize(c.RelPath)]
 }
 
-// Icon returns the type glyph and its color for a candidate.
-// Glyphs come from config; colors stay fixed per type.
-func Icon(c Candidate, ic config.Icons) (string, color.Color) {
-	switch {
-	case c.IsTmp:
-		return ic.Tmp, lipgloss.Magenta
-	case c.IsRepo:
-		return ic.Repo, lipgloss.Green
-	default:
-		return ic.Project, lipgloss.Blue
-	}
+// ValidTmpName reports whether s is safe as a tmp project directory name.
+func ValidTmpName(s string) bool {
+	return !strings.Contains(s, "/") && !strings.Contains(s, "..")
 }
 
-func LoadTmpCandidates(tmpPath string) []Candidate {
+// AutoTmpName returns a timestamped fallback name for unnamed tmp projects.
+func AutoTmpName() string {
+	return "tmp-" + time.Now().Format("20060102-150405")
+}
+
+// LoadTmp returns every directory under tmpPath as a tmp candidate.
+func LoadTmp(tmpPath string) []Candidate {
 	entries, err := os.ReadDir(tmpPath)
 	if err != nil {
 		return nil

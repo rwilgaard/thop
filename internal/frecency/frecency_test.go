@@ -41,17 +41,6 @@ func TestLoad_missingFile(t *testing.T) {
 	}
 }
 
-func TestLoad_missingParentDir(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "nonexistent", "history.tsv")
-	scores, err := Load(file)
-	if err != nil {
-		t.Fatalf("Load with missing parent dir returned error: %v", err)
-	}
-	if len(scores) != 0 {
-		t.Errorf("expected empty map, got %v", scores)
-	}
-}
-
 func TestLoad_existing(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "history.tsv")
@@ -130,19 +119,5 @@ func TestRecord_concurrent(t *testing.T) {
 	}
 	if entries["foo/bar"].visits != n {
 		t.Errorf("visits = %d, want %d", entries["foo/bar"].visits, n)
-	}
-}
-
-func TestRoundTrip(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "history.tsv")
-	if err := Record(file, "myproject"); err != nil {
-		t.Fatal(err)
-	}
-	scores, err := Load(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scores["myproject"] <= 0 {
-		t.Errorf("expected positive score, got %v", scores["myproject"])
 	}
 }

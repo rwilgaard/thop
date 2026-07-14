@@ -1,86 +1,77 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 )
 
 const leftPad = " "
 
-var (
-	icons        config.Icons
-	activeLabel  string // icons.Active + " open ", set in initStyles
-	glyphPrompt  string
-	glyphSelect  string
-	glyphWarning string
-	glyphSep     string
-)
+// styles bundles the configured glyphs and lipgloss styles used for rendering.
+// Built once in newModel — no package-level render state, so any model
+// (including test-constructed ones) renders correctly.
+type styles struct {
+	icons       config.Icons
+	activeLabel string // icons.Active + " open "
 
-var (
-	styleSep            lipgloss.Style
-	stylePrompt         lipgloss.Style
-	styleSelected       lipgloss.Style
-	styleSelectedActive lipgloss.Style
-	styleStatusPill     lipgloss.Style
-	styleFilterActive   lipgloss.Style
-	styleDimActive      lipgloss.Style
-	styleTmpName        lipgloss.Style
-	styleMatch          lipgloss.Style
-	styleHelpKey        lipgloss.Style
-	styleHelpDesc       lipgloss.Style
-)
-
-func orDefault(v, def string) string {
-	if v == "" {
-		return def
-	}
-	return v
+	sep            lipgloss.Style
+	prompt         lipgloss.Style
+	selected       lipgloss.Style
+	selectedActive lipgloss.Style
+	statusPill     lipgloss.Style
+	filterActive   lipgloss.Style
+	dimActive      lipgloss.Style
+	tmpName        lipgloss.Style
+	match          lipgloss.Style
+	helpKey        lipgloss.Style
+	helpDesc       lipgloss.Style
 }
 
-func initStyles(cfg config.Config) {
-	c := cfg.Colors
-	// A bare config.Config{} (tests, direct construction) has empty icons;
-	// backfill defaults so glyphs never render blank. Load already does this
-	// for the real path, making these no-ops there.
-	def := config.DefaultIcons()
-	icons = config.Icons{
-		Project:   orDefault(cfg.Icons.Project, def.Project),
-		Repo:      orDefault(cfg.Icons.Repo, def.Repo),
-		Tmp:       orDefault(cfg.Icons.Tmp, def.Tmp),
-		Prompt:    orDefault(cfg.Icons.Prompt, def.Prompt),
-		Active:    orDefault(cfg.Icons.Active, def.Active),
-		Selected:  orDefault(cfg.Icons.Selected, def.Selected),
-		Warning:   orDefault(cfg.Icons.Warning, def.Warning),
-		Separator: orDefault(cfg.Icons.Separator, def.Separator),
-	}
-	activeLabel = icons.Active + " open "
-	glyphPrompt = icons.Prompt
-	glyphSelect = icons.Selected
-	glyphWarning = icons.Warning
-	glyphSep = icons.Separator
-	styleSep = lipgloss.NewStyle().Faint(true)
-	stylePrompt = lipgloss.NewStyle().Foreground(lipgloss.Color(c.PromptColor)).Bold(true)
-	styleSelected = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
-	styleSelectedActive = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.ActiveColor)).Bold(true)
-	styleStatusPill = lipgloss.NewStyle().Background(lipgloss.Color(c.StatusActiveColor)).Foreground(lipgloss.Black).Bold(true)
-	styleFilterActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
-	styleDimActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.ActiveColor))
-	styleTmpName = lipgloss.NewStyle().Foreground(lipgloss.Magenta)
+func newStyles(cfg config.Config) styles {
+	// A bare config.Config{} (tests, direct construction) has empty icons and
+	// colors; backfill defaults so nothing renders blank. Load already does
+	// this for the real path, making it a no-op there.
+	c := cfg.Colors.OrDefaults()
+	st := styles{icons: cfg.Icons.OrDefaults()}
+	st.activeLabel = st.icons.Active + " open "
+	st.sep = lipgloss.NewStyle().Faint(true)
+	st.prompt = lipgloss.NewStyle().Foreground(lipgloss.Color(c.PromptColor)).Bold(true)
+	st.selected = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
+	st.selectedActive = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.ActiveColor)).Bold(true)
+	st.statusPill = lipgloss.NewStyle().Background(lipgloss.Color(c.StatusActiveColor)).Foreground(lipgloss.Black).Bold(true)
+	st.filterActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
+	st.dimActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.ActiveColor))
+	st.tmpName = lipgloss.NewStyle().Foreground(lipgloss.Magenta)
 	match := c.MatchColor
 	if match == "" {
 		match = c.PromptColor
 	}
-	styleMatch = lipgloss.NewStyle().Foreground(lipgloss.Color(match)).Bold(true)
+	st.match = lipgloss.NewStyle().Foreground(lipgloss.Color(match)).Bold(true)
 
-	styleHelpKey = lipgloss.NewStyle().Bold(true)
+	st.helpKey = lipgloss.NewStyle().Bold(true)
 	if c.HelpKeyColor != "" {
-		styleHelpKey = styleHelpKey.Foreground(lipgloss.Color(c.HelpKeyColor))
+		st.helpKey = st.helpKey.Foreground(lipgloss.Color(c.HelpKeyColor))
 	}
-	styleHelpDesc = lipgloss.NewStyle().Faint(true)
+	st.helpDesc = lipgloss.NewStyle().Faint(true)
 	if c.HelpDescColor != "" {
-		styleHelpDesc = styleHelpDesc.Foreground(lipgloss.Color(c.HelpDescColor))
+		st.helpDesc = st.helpDesc.Foreground(lipgloss.Color(c.HelpDescColor))
+	}
+	return st
+}
+
+// iconFor returns the type glyph and its fixed per-type color for a candidate.
+func iconFor(c candidates.Candidate, ic config.Icons) (string, color.Color) {
+	switch {
+	case c.IsTmp:
+		return ic.Tmp, lipgloss.Magenta
+	case c.IsRepo:
+		return ic.Repo, lipgloss.Green
+	default:
+		return ic.Project, lipgloss.Blue
 	}
 }
 
@@ -88,11 +79,11 @@ func initStyles(cfg config.Config) {
 // and search rows. Single source of the bracket convention (see spelledKey).
 func bracketKey(s string) string { return "<" + s + ">" }
 
-func keyHints(pairs [][2]string) string {
+func (st styles) keyHints(pairs [][2]string) string {
 	var parts []string
 	for _, p := range pairs {
-		key := stylePrompt.Render(bracketKey(p[0]))
-		action := styleSep.Render(p[1])
+		key := st.prompt.Render(bracketKey(p[0]))
+		action := st.sep.Render(p[1])
 		parts = append(parts, key+" "+action)
 	}
 	return strings.Join(parts, "  ")

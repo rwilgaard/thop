@@ -1,32 +1,15 @@
 package candidates
 
 import (
-	"image/color"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
-	"github.com/rwilgaard/thop/internal/config"
+	"github.com/rwilgaard/thop/internal/tmux"
 )
 
-func TestSessionize(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"foo.bar", "foo_bar"},
-		{"foo", "foo"},
-		{"a.b.c", "a_b_c"},
-		{"nodots", "nodots"},
-	}
-	for _, tt := range tests {
-		if got := sessionize(tt.in); got != tt.want {
-			t.Errorf("sessionize(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
-func TestCandidateActive(t *testing.T) {
+func TestActive(t *testing.T) {
 	tests := []struct {
 		name     string
 		c        Candidate
@@ -65,30 +48,9 @@ func TestCandidateActive(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := CandidateActive(tt.c, tt.sessions, tt.windows); got != tt.want {
-				t.Errorf("CandidateActive() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIcon(t *testing.T) {
-	ic := config.Icons{Project: "P", Repo: "R", Tmp: "T"}
-	tests := []struct {
-		name      string
-		c         Candidate
-		wantGlyph string
-		wantColor color.Color
-	}{
-		{"project", Candidate{}, "P", lipgloss.Blue},
-		{"repo", Candidate{IsRepo: true}, "R", lipgloss.Green},
-		{"tmp", Candidate{IsTmp: true}, "T", lipgloss.Magenta},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			glyph, col := Icon(tt.c, ic)
-			if glyph != tt.wantGlyph || col != tt.wantColor {
-				t.Errorf("Icon() = %q,%v want %q,%v", glyph, col, tt.wantGlyph, tt.wantColor)
+			ts := tmux.State{Sessions: tt.sessions, Windows: tt.windows}
+			if got := Active(tt.c, ts); got != tt.want {
+				t.Errorf("Active() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -147,7 +109,33 @@ func TestReadCache_emptyFile(t *testing.T) {
 	}
 }
 
-func TestLoadTmpCandidates(t *testing.T) {
+func TestValidTmpName(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"", true}, // empty = auto-name
+		{"scratch", true},
+		{"foo.bar", true},
+		{"a/b", false},
+		{"..", false},
+		{"../up", false},
+	}
+	for _, tt := range tests {
+		if got := ValidTmpName(tt.in); got != tt.want {
+			t.Errorf("ValidTmpName(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestAutoTmpName(t *testing.T) {
+	name := AutoTmpName()
+	if !strings.HasPrefix(name, "tmp-") || len(name) != len("tmp-20060102-150405") {
+		t.Errorf("AutoTmpName() = %q, want tmp-YYYYMMDD-HHMMSS form", name)
+	}
+}
+
+func TestLoadTmp(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"scratch-a", "scratch-b"} {
 		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
@@ -158,7 +146,7 @@ func TestLoadTmpCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cands := LoadTmpCandidates(dir)
+	cands := LoadTmp(dir)
 	if len(cands) != 2 {
 		t.Fatalf("got %d candidates, want 2", len(cands))
 	}
@@ -175,8 +163,8 @@ func TestLoadTmpCandidates(t *testing.T) {
 	}
 }
 
-func TestLoadTmpCandidates_missingDir(t *testing.T) {
-	cands := LoadTmpCandidates("/nonexistent/path/thop/tmp")
+func TestLoadTmp_missingDir(t *testing.T) {
+	cands := LoadTmp("/nonexistent/path/thop/tmp")
 	if cands != nil {
 		t.Errorf("expected nil for missing dir, got %v", cands)
 	}

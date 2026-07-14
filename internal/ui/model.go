@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -79,42 +78,55 @@ type scoredItem struct {
 	matches []int // matched byte offsets into RelPath
 }
 
-type pendingItem struct {
-	base     baseItem
-	rawScore float64
-	matches  []int
+// cloneFlow holds Ctrl-G clone state: URL entry, destination picking, rename
+// on conflict.
+type cloneFlow struct {
+	tiURL        textinput.Model
+	tiDest       textinput.Model
+	tiName       textinput.Model // rename-on-conflict input
+	destFiltered []scoredItem
+	destCursor   int
+	destDir      string // chosen parent dir (set when conflict detected)
+}
+
+// tmpFlow holds Ctrl-N new-tmp-project state.
+type tmpFlow struct {
+	tiName   textinput.Model
+	conflict bool // typed name already exists
+}
+
+// cleanFlow holds Ctrl-X tmp-deletion state.
+type cleanFlow struct {
+	tiQuery  textinput.Model
+	filtered []scoredItem // search-filtered view of tmp candidates
+	cursor   int
+	selected map[string]bool // AbsPath of selected tmp candidates
 }
 
 type model struct {
-	all           []baseItem
-	normFrec      map[string]float64
-	filtered      []scoredItem
-	tiQuery       textinput.Model // modeNormal search
-	cursor        int
-	view          viewMode
-	switchOnly    bool
-	width         int
-	height        int
-	result        Result
-	ready         bool
-	inputMode     inputMode
-	tiURL         textinput.Model
-	tiDest        textinput.Model
-	tiCloneName   textinput.Model
-	destFiltered  []scoredItem
-	destCursor    int
-	cloneDestDir  string // chosen parent dir (set when conflict detected)
-	tiName        textinput.Model
-	nameConflict  bool // modeNameInput: typed name already exists
+	all        []baseItem
+	normFrec   map[string]float64
+	filtered   []scoredItem
+	tiQuery    textinput.Model // modeNormal search
+	cursor     int
+	view       viewMode
+	switchOnly bool
+	width      int
+	height     int
+	result     Result
+	ready      bool
+	inputMode  inputMode
+
+	clone cloneFlow
+	tmp   tmpFlow
+	clean cleanFlow
+
 	tmpPath       string
 	showHelp      bool
-	selected      map[string]bool // AbsPath of selected tmp candidates (modeCleanTmp)
-	cleanFiltered []scoredItem    // search-filtered view of tmp candidates
-	cleanCursor   int
-	tiClean       textinput.Model
 	inTmux        bool
 	layoutBottom  bool // layout: "bottom" — status bar top, search bar bottom, lists reversed
 	keys          keyMap
+	st            styles
 	spin          spinner.Model
 	loadingText   string
 	errMsg        string
@@ -157,7 +169,7 @@ func cmdCreateTmp(tmpPath, name string) tea.Cmd {
 	}
 }
 
-func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, cfg config.Config, inTmux bool) model {
+func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool) model {
 	all := make([]baseItem, 0, len(cs))
 	for _, c := range cs {
 		all = append(all, makeBaseItem(c, ts))
@@ -169,26 +181,33 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Tmux
 		tmpPath:      cfg.TmpPath,
 		layoutBottom: cfg.Layout == "bottom",
 		keys:         buildKeyMap(cfg),
-		selected:     make(map[string]bool),
+		st:           newStyles(cfg),
 		inTmux:       inTmux,
 		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		ctx:          context.Background(),
 		tiQuery:      newTextInput("Search projects…"),
-		tiURL:        newTextInput("https://github.com/owner/repo.git"),
-		tiDest:       newTextInput("Search folders…"),
-		tiCloneName:  newTextInput(""),
-		tiClean:      newTextInput("Search…"),
-		tiName:       newTextInput("Name (empty = auto)"),
+		clone: cloneFlow{
+			tiURL:  newTextInput("https://github.com/owner/repo.git"),
+			tiDest: newTextInput("Search folders…"),
+			tiName: newTextInput(""),
+		},
+		tmp: tmpFlow{
+			tiName: newTextInput("Name (empty = auto)"),
+		},
+		clean: cleanFlow{
+			tiQuery:  newTextInput("Search…"),
+			selected: make(map[string]bool),
+		},
 	}
 	_ = m.tiQuery.Focus()
 	m.rebuildFiltered()
 	return m
 }
 
-func makeBaseItem(c candidates.Candidate, ts tmux.TmuxState) baseItem {
+func makeBaseItem(c candidates.Candidate, ts tmux.State) baseItem {
 	return baseItem{
 		candidate: c,
-		active:    candidates.CandidateActive(c, ts.Sessions, ts.Windows),
+		active:    candidates.Active(c, ts),
 	}
 }
 
@@ -201,10 +220,6 @@ func (m model) tmpItems() []baseItem {
 		}
 	}
 	return out
-}
-
-func invalidTmpName(s string) bool {
-	return strings.Contains(s, "/") || strings.Contains(s, "..")
 }
 
 // moveCursor returns cur stepped by delta, clamped to [0, n).
@@ -227,34 +242,13 @@ func (m model) visualStep(dir int) int {
 
 func (m model) Init() tea.Cmd { return nil }
 
-func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.TmuxState, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
-	initStyles(cfg)
-	m := newModel(cs, scores, ts, switchOnly, cfg, inTmux)
+// runProgram runs m to completion and extracts its Result, wiring up the
+// context that cancels in-flight clones when the program exits.
+func runProgram(m model) (Result, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m.ctx = ctx
-	p := tea.NewProgram(m)
-	final, err := p.Run()
-	if err != nil {
-		return Result{}, err
-	}
-	if m, ok := final.(model); ok {
-		return m.result, nil
-	}
-	return Result{}, nil
-}
-
-func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
-	initStyles(cfg)
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, cfg, inTmux)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	m.ctx = ctx
-	m.tiURL.SetValue(cloneURL)
-	m.inputMode = modeDestPicker
-	m.rebuildDestFiltered()
-	p := tea.NewProgram(m)
-	final, err := p.Run()
+	final, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return Result{}, err
 	}
@@ -262,4 +256,16 @@ func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cl
 		return fm.result, nil
 	}
 	return Result{}, nil
+}
+
+func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
+	return runProgram(newModel(cs, scores, ts, switchOnly, cfg, inTmux))
+}
+
+func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, inTmux)
+	m.clone.tiURL.SetValue(cloneURL)
+	m.inputMode = modeDestPicker
+	m.rebuildDestFiltered()
+	return runProgram(m)
 }
