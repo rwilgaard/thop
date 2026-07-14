@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
@@ -76,38 +75,21 @@ func main() {
 		}
 	}
 
-	if flag.NArg() >= 1 && flag.Arg(0) == "clone" && flag.NArg() != 2 {
-		fatalf("usage: thop clone <url>")
-	}
-
-	if flag.NArg() == 2 && flag.Arg(0) == "clone" {
-		url := flag.Arg(1)
+	switch {
+	case flag.Arg(0) == "clone":
+		if flag.NArg() != 2 {
+			fatalf("usage: thop clone <url>")
+		}
 		validateKeymap()
 		if runInPopupIfNeeded(inTmux, *popup, cfg) {
 			return
 		}
-		static, loadErr := candidates.LoadCandidates(cfg.Paths, cacheFile)
-		if loadErr != nil {
-			fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", loadErr)
-		}
-		result, err := ui.RunDestPicker(append(static, candidates.LoadTmpCandidates(cfg.TmpPath)...), cfg, inTmux, url)
-		if err != nil {
-			fatalf("dest picker: %v", err)
-		}
-		openResult(result, cfg, frecencyFile, inTmux)
+		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux)
 		return
-	}
-
-	if flag.NArg() >= 1 && flag.Arg(0) == "tmp" {
-		name := ""
-		if flag.NArg() >= 2 {
-			name = flag.Arg(1)
-		}
-		doTmp(cfg.TmpPath, name, frecencyFile)
+	case flag.Arg(0) == "tmp":
+		doTmp(cfg.TmpPath, flag.Arg(1), frecencyFile)
 		return
-	}
-
-	if flag.NArg() == 1 {
+	case flag.NArg() == 1:
 		arg, err := filepath.Abs(flag.Arg(0))
 		if err != nil {
 			fatalf("resolve path: %v", err)
@@ -129,15 +111,13 @@ func main() {
 	}
 
 	var (
-		static    []candidates.Candidate
-		tmpCands  []candidates.Candidate
-		tmuxState tmux.TmuxState
-		scores    map[string]float64
-		wg        sync.WaitGroup
-	)
-	var (
+		static        []candidates.Candidate
+		tmpCands      []candidates.Candidate
+		tmuxState     tmux.State
+		scores        map[string]float64
 		candidatesErr error
 		frecencyErr   error
+		wg            sync.WaitGroup
 	)
 	wg.Add(4)
 	go func() {
@@ -151,13 +131,10 @@ func main() {
 	go func() {
 		defer wg.Done()
 		scores, frecencyErr = frecency.Load(frecencyFile)
-		if scores == nil {
-			scores = map[string]float64{}
-		}
 	}()
 	go func() {
 		defer wg.Done()
-		tmpCands = candidates.LoadTmpCandidates(cfg.TmpPath)
+		tmpCands = candidates.LoadTmp(cfg.TmpPath)
 	}()
 	wg.Wait()
 
@@ -221,12 +198,24 @@ func handleOpen(path, root, frecencyFile string, inTmux bool) {
 	}
 }
 
+func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool) {
+	static, err := candidates.LoadCandidates(cfg.Paths, cacheFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", err)
+	}
+	result, err := ui.RunDestPicker(append(static, candidates.LoadTmp(cfg.TmpPath)...), cfg, inTmux, url)
+	if err != nil {
+		fatalf("dest picker: %v", err)
+	}
+	openResult(result, cfg, frecencyFile, inTmux)
+}
+
 func doTmp(tmpPath, name, frecencyFile string) {
-	if name != "" && (strings.Contains(name, "/") || strings.Contains(name, "..")) {
+	if !candidates.ValidTmpName(name) {
 		fatalf("tmp name must not contain path separators or '..'")
 	}
 	if name == "" {
-		name = "tmp-" + time.Now().Format("20060102-150405")
+		name = candidates.AutoTmpName()
 	}
 	dest := filepath.Join(tmpPath, name)
 	if err := os.MkdirAll(dest, 0o755); err != nil {

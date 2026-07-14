@@ -3,12 +3,15 @@ package frecency
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/rwilgaard/thop/internal/atomicfile"
 )
 
 type entry struct {
@@ -34,10 +37,11 @@ func recencyWeight(lastTs int64) float64 {
 
 // Load reads the history file and returns a frecency score per path.
 // Score = visits * recencyWeight(lastAccess). Higher = more frequent and recent.
+// The map is non-nil even on error, so callers can use it directly.
 func Load(file string) (map[string]float64, error) {
 	entries, err := readEntries(file)
 	if err != nil {
-		return nil, err
+		return map[string]float64{}, err
 	}
 	scores := make(map[string]float64, len(entries))
 	for path, e := range entries {
@@ -115,23 +119,10 @@ func readEntries(file string) (map[string]entry, error) {
 }
 
 func writeEntries(file string, entries map[string]entry) error {
-	tmp, err := os.CreateTemp(filepath.Dir(file), "frecency-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-
-	w := bufio.NewWriter(tmp)
-	for path, e := range entries {
-		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\n", path, e.visits, e.lastTs)
-	}
-	if err := w.Flush(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, file)
+	return atomicfile.Write(file, func(w io.Writer) error {
+		for path, e := range entries {
+			_, _ = fmt.Fprintf(w, "%s\t%d\t%d\n", path, e.visits, e.lastTs)
+		}
+		return nil
+	})
 }

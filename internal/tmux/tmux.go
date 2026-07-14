@@ -10,15 +10,15 @@ import (
 	"strings"
 )
 
-// TmuxState holds the set of active session and window names.
-type TmuxState struct {
+// State holds the set of active session and window names.
+type State struct {
 	Sessions map[string]bool // session name → exists
 	Windows  map[string]bool // "session/window" → exists
 }
 
 // LoadState queries tmux for all active sessions and windows.
-func LoadState() TmuxState {
-	ts := TmuxState{
+func LoadState() State {
+	ts := State{
 		Sessions: map[string]bool{},
 		Windows:  map[string]bool{},
 	}
@@ -55,7 +55,7 @@ func HandleSelection(selected, root string) error {
 		isRepo = true
 	}
 
-	sessionName := sessionize(filepath.Base(projectDir))
+	sessionName := Sessionize(filepath.Base(projectDir))
 
 	if !hasSession(sessionName) {
 		// Create session with projectDir as root so user-created windows inherit it.
@@ -64,8 +64,7 @@ func HandleSelection(selected, root string) error {
 		}
 		if isRepo {
 			// kill the initial window so only the repo window remains.
-			windowName := filepath.Base(selected)
-			if err := tmuxRun("new-window", "-a", "-t", exact(sessionName)+":{end}", "-n", windowName, "-c", selected); err != nil {
+			if err := newWindow(sessionName, selected); err != nil {
 				return fmt.Errorf("open window: %w", err)
 			}
 			_ = tmuxRun("kill-window", "-t", exact(sessionName)+":^")
@@ -83,7 +82,9 @@ func HandleSelection(selected, root string) error {
 	return switchTo(sessionName)
 }
 
-func sessionize(name string) string {
+// Sessionize maps a directory name to a valid tmux session name.
+// Shared with candidate matching so active-session lookups stay in sync.
+func Sessionize(name string) string {
 	return strings.ReplaceAll(name, ".", "_")
 }
 
@@ -111,12 +112,16 @@ func newSession(session, startDir, windowName string) error {
 }
 
 func openRepoWindow(session, repoPath string) error {
-	windowName := filepath.Base(repoPath)
 	// Use "=name" prefix for exact-match to avoid tmux parsing dots as window.pane.
-	if err := tmuxRun("select-window", "-t", exact(session)+":="+windowName); err != nil {
-		return tmuxRun("new-window", "-a", "-t", exact(session)+":{end}", "-n", windowName, "-c", repoPath)
+	if err := tmuxRun("select-window", "-t", exact(session)+":="+filepath.Base(repoPath)); err != nil {
+		return newWindow(session, repoPath)
 	}
 	return nil
+}
+
+// newWindow appends a window named after path's base dir at the end of session.
+func newWindow(session, path string) error {
+	return tmuxRun("new-window", "-a", "-t", exact(session)+":{end}", "-n", filepath.Base(path), "-c", path)
 }
 
 func hydrate(session, projectDir string) {

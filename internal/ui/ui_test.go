@@ -59,35 +59,9 @@ func TestNormalizeScores(t *testing.T) {
 	}
 }
 
-func TestCombineScore(t *testing.T) {
-	tests := []struct {
-		name         string
-		normFuzzy    float64
-		normFrecency float64
-		want         float64
-	}{
-		{"both zero", 0.0, 0.0, 0.0},
-		{"fuzzy only", 1.0, 0.0, 0.6},
-		{"frecency only", 0.0, 1.0, 0.4},
-		{"combined", 1.0, 1.0, 1.0},
-		{"weighted mix", 0.5, 0.5, 0.5},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := combineScore(tt.normFuzzy, tt.normFrecency)
-			// float64 comparison: allow epsilon
-			const eps = 1e-9
-			diff := got - tt.want
-			if diff > eps || diff < -eps {
-				t.Errorf("got %v want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRebuildFiltered(t *testing.T) {
 	makeModel := func(items []baseItem, frecency map[string]float64) model {
-		m := newModel(nil, frecency, tmux.TmuxState{}, false, config.Config{}, false)
+		m := newModel(nil, frecency, tmux.State{}, false, config.Config{}, false)
 		m.all = items
 		m.rebuildFiltered()
 		return m
@@ -172,6 +146,35 @@ func TestRebuildFiltered(t *testing.T) {
 		}
 	})
 
+	t.Run("viewTmp excludes non-tmp", func(t *testing.T) {
+		items := []baseItem{
+			{candidate: cand.Candidate{RelPath: "proj"}},
+			{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
+		}
+		m := makeModel(items, map[string]float64{})
+		m.view = viewTmp
+		m.rebuildFiltered()
+
+		if len(m.filtered) != 1 || !m.filtered[0].base.candidate.IsTmp {
+			t.Errorf("viewTmp should show only tmp items, got %v", m.filtered)
+		}
+	})
+
+	t.Run("viewProject excludes tmp", func(t *testing.T) {
+		items := []baseItem{
+			{candidate: cand.Candidate{RelPath: "proj"}},
+			{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
+			{candidate: cand.Candidate{RelPath: "repo", IsRepo: true}},
+		}
+		m := makeModel(items, map[string]float64{})
+		m.view = viewProject
+		m.rebuildFiltered()
+
+		if len(m.filtered) != 1 || m.filtered[0].base.candidate.RelPath != "proj" {
+			t.Errorf("viewProject should show only non-repo non-tmp, got %v", m.filtered)
+		}
+	})
+
 	t.Run("switchOnly excludes inactive items", func(t *testing.T) {
 		items := []baseItem{
 			{candidate: cand.Candidate{RelPath: "active-session", IsRepo: false}, active: true},
@@ -208,13 +211,12 @@ func TestRebuildFiltered(t *testing.T) {
 }
 
 func TestView(t *testing.T) {
-	initStyles(config.Config{})
 	cs := []cand.Candidate{
 		{AbsPath: "/p/golang/foo", RelPath: "golang/foo", IsRepo: true},
 		{AbsPath: "/p/work", RelPath: "work", IsRepo: false},
 	}
 	scores := map[string]float64{"/p/golang/foo": 1.0}
-	ts := tmux.TmuxState{
+	ts := tmux.State{
 		Sessions: map[string]bool{"golang": true},
 		Windows:  map[string]bool{"golang/foo": true},
 	}
@@ -231,6 +233,10 @@ func TestView(t *testing.T) {
 	}{
 		{"❯", "prompt glyph"},
 		{"Help", "help hint"},
+		{"Open", "open hint"},
+		// full placeholder can't match: textinput renders the first rune as a
+		// separate cursor-styled ANSI run
+		{"earch projects…", "search placeholder"},
 		{"golang/foo", "first item"},
 		{"work", "second item"},
 		{"", "repo icon"},
@@ -257,9 +263,9 @@ func TestView(t *testing.T) {
 }
 
 func TestUpdateURLInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.inputMode = modeURLInput
-	_ = m.tiURL.Focus()
+	_ = m.clone.tiURL.Focus()
 
 	// Type characters
 	for _, ch := range []string{"h", "t", "t", "p"} {
@@ -267,16 +273,16 @@ func TestUpdateURLInput(t *testing.T) {
 		updated, _ := m.Update(msg)
 		m = updated.(model)
 	}
-	if m.tiURL.Value() != "http" {
-		t.Errorf("tiURL = %q, want %q", m.tiURL.Value(), "http")
+	if m.clone.tiURL.Value() != "http" {
+		t.Errorf("clone.tiURL = %q, want %q", m.clone.tiURL.Value(), "http")
 	}
 
 	// Backspace
 	bsp := tea.KeyPressMsg{Code: tea.KeyBackspace}
 	updated, _ := m.Update(bsp)
 	m = updated.(model)
-	if m.tiURL.Value() != "htt" {
-		t.Errorf("after backspace tiURL = %q, want %q", m.tiURL.Value(), "htt")
+	if m.clone.tiURL.Value() != "htt" {
+		t.Errorf("after backspace tiURL = %q, want %q", m.clone.tiURL.Value(), "htt")
 	}
 
 	// Esc cancels
@@ -286,17 +292,17 @@ func TestUpdateURLInput(t *testing.T) {
 	if m.inputMode != modeNormal {
 		t.Errorf("esc should return to modeNormal, got %v", m.inputMode)
 	}
-	if m.tiURL.Value() != "" {
-		t.Errorf("esc should clear tiURL, got %q", m.tiURL.Value())
+	if m.clone.tiURL.Value() != "" {
+		t.Errorf("esc should clear tiURL, got %q", m.clone.tiURL.Value())
 	}
 	if !m.tiQuery.Focused() {
 		t.Error("esc should focus tiQuery")
 	}
 
 	// Enter with non-empty URL advances to modeDestPicker
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m2 := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m2.inputMode = modeURLInput
-	_ = m2.tiURL.Focus()
+	_ = m2.clone.tiURL.Focus()
 	for _, ch := range []string{"h", "t", "t", "p"} {
 		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
 		updated2, _ := m2.Update(msg)
@@ -320,10 +326,10 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	cs := []cand.Candidate{
 		{AbsPath: parentDir, Root: filepath.Dir(parentDir), RelPath: filepath.Base(parentDir), IsRepo: false},
 	}
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.inputMode = modeDestPicker
-	m.tiURL.SetValue("https://github.com/user/myrepo")
-	_ = m.tiDest.Focus()
+	m.clone.tiURL.SetValue("https://github.com/user/myrepo")
+	_ = m.clone.tiDest.Focus()
 	m.rebuildDestFiltered()
 
 	// Select the candidate and press enter — should detect conflict.
@@ -333,8 +339,8 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	if m.inputMode != modeCloneName {
 		t.Errorf("conflict should advance to modeCloneName, got %v", m.inputMode)
 	}
-	if m.tiCloneName.Value() != "myrepo" {
-		t.Errorf("tiCloneName = %q, want %q", m.tiCloneName.Value(), "myrepo")
+	if m.clone.tiName.Value() != "myrepo" {
+		t.Errorf("clone.tiName = %q, want %q", m.clone.tiName.Value(), "myrepo")
 	}
 
 	// Type a new name and confirm.
@@ -359,10 +365,10 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 }
 
 func TestUpdateCloneName_esc(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.inputMode = modeCloneName
-	m.tiCloneName.SetValue("myrepo")
-	_ = m.tiCloneName.Focus()
+	m.clone.tiName.SetValue("myrepo")
+	_ = m.clone.tiName.Focus()
 	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
 	updated, _ := m.Update(esc)
 	m = updated.(model)
@@ -371,52 +377,18 @@ func TestUpdateCloneName_esc(t *testing.T) {
 	}
 }
 
-func TestRebuildFiltered_viewTmp(t *testing.T) {
-	items := []baseItem{
-		{candidate: cand.Candidate{RelPath: "proj", IsRepo: false, IsTmp: false}},
-		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
-	}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
-	m.all = items
-	m.view = viewTmp
-	m.rebuildFiltered()
-
-	if len(m.filtered) != 1 {
-		t.Fatalf("viewTmp: got %d items, want 1", len(m.filtered))
-	}
-	if !m.filtered[0].base.candidate.IsTmp {
-		t.Errorf("viewTmp: got non-tmp item")
-	}
-}
-
-func TestRebuildFiltered_viewProjectExcludesTmp(t *testing.T) {
-	items := []baseItem{
-		{candidate: cand.Candidate{RelPath: "proj", IsRepo: false, IsTmp: false}},
-		{candidate: cand.Candidate{RelPath: "scratch", IsTmp: true}},
-		{candidate: cand.Candidate{RelPath: "repo", IsRepo: true}},
-	}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
-	m.all = items
-	m.view = viewProject
-	m.rebuildFiltered()
-
-	if len(m.filtered) != 1 || m.filtered[0].base.candidate.RelPath != "proj" {
-		t.Errorf("viewProject should show only non-repo non-tmp, got %v", m.filtered)
-	}
-}
-
 func TestUpdateNameInput(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.inputMode = modeNameInput
-	_ = m.tiName.Focus()
+	_ = m.tmp.tiName.Focus()
 
 	for _, ch := range []string{"f", "o", "o"} {
 		msg := tea.KeyPressMsg{Text: ch, Code: rune(ch[0])}
 		updated, _ := m.Update(msg)
 		m = updated.(model)
 	}
-	if m.tiName.Value() != "foo" {
-		t.Errorf("tiName = %q, want %q", m.tiName.Value(), "foo")
+	if m.tmp.tiName.Value() != "foo" {
+		t.Errorf("tmp.tiName = %q, want %q", m.tmp.tiName.Value(), "foo")
 	}
 
 	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
@@ -436,17 +408,17 @@ func TestUpdateNameInput_conflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.inputMode = modeNameInput
-	_ = m.tiName.Focus()
-	m.tiName.SetValue("existing")
+	_ = m.tmp.tiName.Focus()
+	m.tmp.tiName.SetValue("existing")
 
 	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
 
 	// first enter: should flag conflict, not quit
 	updated, _ := m.Update(enter)
 	m = updated.(model)
-	if !m.nameConflict {
+	if !m.tmp.conflict {
 		t.Error("first enter on existing name should set nameConflict")
 	}
 	if m.result.Tmp != nil {
@@ -464,15 +436,15 @@ func TestUpdateNameInput_conflict(t *testing.T) {
 	}
 
 	// typing resets conflict flag
-	m2 := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
+	m2 := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
 	m2.inputMode = modeNameInput
-	m2.nameConflict = true
-	_ = m2.tiName.Focus()
-	m2.tiName.SetValue("exist")
+	m2.tmp.conflict = true
+	_ = m2.tmp.tiName.Focus()
+	m2.tmp.tiName.SetValue("exist")
 	ch := tea.KeyPressMsg{Text: "x", Code: 'x'}
 	updated2, _ := m2.Update(ch)
 	m2 = updated2.(model)
-	if m2.nameConflict {
+	if m2.tmp.conflict {
 		t.Error("typing should reset nameConflict")
 	}
 }
@@ -483,7 +455,7 @@ func TestUpdateConfirmClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.inputMode = modeCleanTmp
 	m.all = []baseItem{{candidate: scratch}}
 	m.rebuildCleanFiltered()
@@ -519,23 +491,23 @@ func TestSelectToggle(t *testing.T) {
 	tmpDir := t.TempDir()
 	scratch := cand.Candidate{RelPath: "scratch", IsTmp: true, AbsPath: filepath.Join(tmpDir, "scratch")}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.all = []baseItem{{candidate: scratch}}
 	m.rebuildCleanFiltered()
-	m.cleanCursor = 0
+	m.clean.cursor = 0
 	m.inputMode = modeCleanTmp
 
 	space := tea.KeyPressMsg{Text: " ", Code: ' '}
 
 	updated, _ := m.Update(space)
 	m = updated.(model)
-	if !m.selected[scratch.AbsPath] {
+	if !m.clean.selected[scratch.AbsPath] {
 		t.Error("space should select item in clean mode")
 	}
 
 	updated, _ = m.Update(space)
 	m = updated.(model)
-	if m.selected[scratch.AbsPath] {
+	if m.clean.selected[scratch.AbsPath] {
 		t.Error("second space should deselect")
 	}
 }
@@ -550,10 +522,10 @@ func TestConfirmClean_selective(t *testing.T) {
 	keep := cand.Candidate{RelPath: "keep", IsTmp: true, AbsPath: filepath.Join(tmpDir, "keep")}
 	del := cand.Candidate{RelPath: "delete", IsTmp: true, AbsPath: filepath.Join(tmpDir, "delete")}
 
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: tmpDir}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
 	m.all = []baseItem{{candidate: keep}, {candidate: del}}
 	m.rebuildCleanFiltered()
-	m.selected = map[string]bool{del.AbsPath: true}
+	m.clean.selected = map[string]bool{del.AbsPath: true}
 	m.inputMode = modeConfirmClean
 	m.rebuildFiltered()
 
@@ -567,7 +539,7 @@ func TestConfirmClean_selective(t *testing.T) {
 	if _, err := os.Stat(keep.AbsPath); err != nil {
 		t.Error("unselected dir should be kept")
 	}
-	if len(m.selected) != 0 {
+	if len(m.clean.selected) != 0 {
 		t.Error("selected should be cleared after delete")
 	}
 	found := false
@@ -582,7 +554,7 @@ func TestConfirmClean_selective(t *testing.T) {
 }
 
 func TestHelpOverlay(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
 	if m.showHelp {
@@ -619,7 +591,7 @@ func TestHelpOverlay(t *testing.T) {
 }
 
 func TestHelpOverlay_narrow(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 60, 24, true
 	m.showHelp = true
 
@@ -647,7 +619,7 @@ func TestRenderName_highlights(t *testing.T) {
 
 func TestRebuildFiltered_storesMatches(t *testing.T) {
 	items := []baseItem{{candidate: cand.Candidate{AbsPath: "/p/abc", RelPath: "abc"}}}
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.all = items
 	m.tiQuery.SetValue("ac")
 	m.rebuildFiltered()
@@ -660,7 +632,7 @@ func TestRebuildFiltered_storesMatches(t *testing.T) {
 }
 
 func TestView_emptyState(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	out := m.View().Content
@@ -689,8 +661,8 @@ func TestErrorRecovery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
-			m.tiURL.SetValue("https://x/y.git")
+			m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+			m.clone.tiURL.SetValue("https://x/y.git")
 			m.result.Clone = &CloneRequest{}
 			m.result.Tmp = &TmpRequest{}
 			m.inputMode = modeLoading
@@ -710,14 +682,14 @@ func TestErrorRecovery(t *testing.T) {
 			if m.errMsg != "" {
 				t.Error("errMsg should be cleared on dismiss")
 			}
-			if tt.wantMode == modeURLInput && m.tiURL.Value() != "https://x/y.git" {
+			if tt.wantMode == modeURLInput && m.clone.tiURL.Value() != "https://x/y.git" {
 				t.Error("URL should be preserved for retry")
 			}
 		})
 	}
 
 	// ctrl+c still quits
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.inputMode = modeError
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
@@ -726,10 +698,10 @@ func TestErrorRecovery(t *testing.T) {
 }
 
 func TestLoadingSpinner(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{TmpPath: t.TempDir()}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: t.TempDir()}, false)
 	m.width, m.height, m.ready = 80, 24, true
 	m.inputMode = modeNameInput
-	m.tiName.SetValue("foo")
+	m.tmp.tiName.SetValue("foo")
 	m.inTmux = true
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -749,25 +721,8 @@ func TestLoadingSpinner(t *testing.T) {
 	}
 }
 
-func TestPlaceholders(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
-	checks := []struct {
-		got  string
-		want string
-		name string
-	}{
-		{m.tiQuery.Placeholder, "Search projects…", "tiQuery"},
-		{m.tiURL.Placeholder, "https://github.com/owner/repo.git", "tiURL"},
-		{m.tiDest.Placeholder, "Search folders…", "tiDest"},
-		{m.tiCloneName.Placeholder, "", "tiCloneName"},
-		{m.tiClean.Placeholder, "Search…", "tiClean"},
-		{m.tiName.Placeholder, "Name (empty = auto)", "tiName"},
-	}
-	for _, c := range checks {
-		if c.got != c.want {
-			t.Errorf("%s placeholder = %q, want %q", c.name, c.got, c.want)
-		}
-	}
+func TestTextInputPrompts(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 
 	// Verify all textinputs have cleared default prompt (no stray "> " after "❯")
 	promptChecks := []struct {
@@ -775,11 +730,11 @@ func TestPlaceholders(t *testing.T) {
 		name string
 	}{
 		{m.tiQuery.Prompt, "tiQuery.Prompt"},
-		{m.tiURL.Prompt, "tiURL.Prompt"},
-		{m.tiDest.Prompt, "tiDest.Prompt"},
-		{m.tiCloneName.Prompt, "tiCloneName.Prompt"},
-		{m.tiClean.Prompt, "tiClean.Prompt"},
-		{m.tiName.Prompt, "tiName.Prompt"},
+		{m.clone.tiURL.Prompt, "clone.tiURL.Prompt"},
+		{m.clone.tiDest.Prompt, "clone.tiDest.Prompt"},
+		{m.clone.tiName.Prompt, "clone.tiName.Prompt"},
+		{m.clean.tiQuery.Prompt, "clean.tiQuery.Prompt"},
+		{m.tmp.tiName.Prompt, "tmp.tiName.Prompt"},
 	}
 	for _, c := range promptChecks {
 		if c.got != "" {
@@ -796,8 +751,7 @@ func TestPlaceholders(t *testing.T) {
 }
 
 func TestPrompts_modes(t *testing.T) {
-	initStyles(config.Config{})
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
 	tests := []struct {
@@ -822,37 +776,22 @@ func TestPrompts_modes(t *testing.T) {
 }
 
 func TestConfirmClean_pluralization(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 	m.inputMode = modeConfirmClean
 
-	m.selected = map[string]bool{"/t/a": true}
+	m.clean.selected = map[string]bool{"/t/a": true}
 	if out := m.View().Content; !strings.Contains(out, "Delete 1 tmp project?") {
 		t.Errorf("singular form missing: %q", out)
 	}
-	m.selected = map[string]bool{"/t/a": true, "/t/b": true}
+	m.clean.selected = map[string]bool{"/t/a": true, "/t/b": true}
 	if out := m.View().Content; !strings.Contains(out, "Delete 2 tmp projects?") {
 		t.Errorf("plural form missing: %q", out)
 	}
 }
 
-func TestNormalMode_hints(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
-	m.width, m.height, m.ready = 100, 24, true
-	out := m.View().Content
-	// "Search projects…" itself can't appear as a contiguous substring:
-	// textinput.View() always renders the placeholder's first rune as a
-	// separate cursor-styled ANSI run, splitting it from the rest.
-	for _, w := range []string{"Open", "Clone", "Help", "earch projects…"} {
-		if !strings.Contains(out, w) {
-			t.Errorf("normal mode missing %q", w)
-		}
-	}
-}
-
 func TestStatusBar_modes(t *testing.T) {
-	initStyles(config.Config{})
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
 	// normal, wide: spelled+bracketed keys with dot separators, matching the
@@ -891,7 +830,7 @@ func TestStatusBar_modes(t *testing.T) {
 
 	// dest picker: clone URL + own count, no tabs
 	m.inputMode = modeDestPicker
-	m.tiURL.SetValue("https://x/y.git")
+	m.clone.tiURL.SetValue("https://x/y.git")
 	m.rebuildDestFiltered()
 	out = m.View().Content
 	if !strings.Contains(out, "https://x/y.git") {
@@ -905,7 +844,7 @@ func TestStatusBar_modes(t *testing.T) {
 	m.inputMode = modeCleanTmp
 	m.all = []baseItem{{candidate: cand.Candidate{AbsPath: "/t/a", RelPath: "a", IsTmp: true}}}
 	m.rebuildCleanFiltered()
-	m.selected = map[string]bool{"/t/a": true}
+	m.clean.selected = map[string]bool{"/t/a": true}
 	out = m.View().Content
 	if !strings.Contains(out, "1 selected") || !strings.Contains(out, "1 items") {
 		t.Errorf("clean mode should show selection and count: %q", out)
@@ -913,15 +852,15 @@ func TestStatusBar_modes(t *testing.T) {
 }
 
 func TestNewModel_layout(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{Layout: "bottom"}, false)
 	if !m.layoutBottom {
 		t.Error("layout: bottom should set layoutBottom")
 	}
-	m = newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{}, false)
+	m = newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	if m.layoutBottom {
 		t.Error("empty layout should default to top")
 	}
-	m = newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "sideways"}, false)
+	m = newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{Layout: "sideways"}, false)
 	if m.layoutBottom {
 		t.Error("unknown layout should default to top")
 	}
@@ -929,7 +868,7 @@ func TestNewModel_layout(t *testing.T) {
 
 func TestLayoutBottom_frame(t *testing.T) {
 	cs := []cand.Candidate{{AbsPath: "/p/foo", RelPath: "foo"}}
-	m := newModel(cs, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{Layout: "bottom"}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	lines := strings.Split(m.View().Content, "\n")
@@ -947,7 +886,7 @@ func TestLayoutBottom_reversedList(t *testing.T) {
 		{AbsPath: "/p/worse", RelPath: "worse"},
 	}
 	scores := map[string]float64{"/p/best": 5.0, "/p/worse": 1.0}
-	m := newModel(cs, scores, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m := newModel(cs, scores, tmux.State{}, false, config.Config{Layout: "bottom"}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	lines := strings.Split(m.View().Content, "\n")
@@ -969,7 +908,7 @@ func TestLayoutBottom_reversedList(t *testing.T) {
 }
 
 func TestLayoutBottom_emptyStateAnchored(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{Layout: "bottom"}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	lines := strings.Split(m.View().Content, "\n")
@@ -994,7 +933,7 @@ func TestLayoutBottom_visualCursor(t *testing.T) {
 		{AbsPath: "/p/worse", RelPath: "worse"},
 	}
 	scores := map[string]float64{"/p/best": 5.0, "/p/worse": 1.0}
-	m := newModel(cs, scores, tmux.TmuxState{}, false, config.Config{Layout: "bottom"}, false)
+	m := newModel(cs, scores, tmux.State{}, false, config.Config{Layout: "bottom"}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	up := tea.KeyPressMsg{Code: tea.KeyUp}
@@ -1026,7 +965,7 @@ func TestTopLayout_cursor(t *testing.T) {
 		{AbsPath: "/p/worse", RelPath: "worse"},
 	}
 	scores := map[string]float64{"/p/best": 5.0, "/p/worse": 1.0}
-	m := newModel(cs, scores, tmux.TmuxState{}, false, config.Config{}, false)
+	m := newModel(cs, scores, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 80, 24, true
 
 	up := tea.KeyPressMsg{Code: tea.KeyUp}

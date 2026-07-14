@@ -185,28 +185,41 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	def := defaultConfig()
 	cfg.Popup.Width = orDefault(cfg.Popup.Width, def.Popup.Width)
 	cfg.Popup.Height = orDefault(cfg.Popup.Height, def.Popup.Height)
-	cfg.Colors.SelectionBg = orDefault(cfg.Colors.SelectionBg, def.Colors.SelectionBg)
-	cfg.Colors.SelectionFg = orDefault(cfg.Colors.SelectionFg, def.Colors.SelectionFg)
-	cfg.Colors.ActiveColor = orDefault(cfg.Colors.ActiveColor, def.Colors.ActiveColor)
-	cfg.Colors.PromptColor = orDefault(cfg.Colors.PromptColor, def.Colors.PromptColor)
-	cfg.Colors.MatchColor = orDefault(cfg.Colors.MatchColor, def.Colors.MatchColor)
-	cfg.Colors.StatusActiveColor = orDefault(cfg.Colors.StatusActiveColor, def.Colors.StatusActiveColor)
-	cfg.Colors.HelpKeyColor = orDefault(cfg.Colors.HelpKeyColor, def.Colors.HelpKeyColor)
-	cfg.Colors.HelpDescColor = orDefault(cfg.Colors.HelpDescColor, def.Colors.HelpDescColor)
-	cfg.Icons.Project = orDefault(cfg.Icons.Project, def.Icons.Project)
-	cfg.Icons.Repo = orDefault(cfg.Icons.Repo, def.Icons.Repo)
-	cfg.Icons.Tmp = orDefault(cfg.Icons.Tmp, def.Icons.Tmp)
-	cfg.Icons.Prompt = orDefault(cfg.Icons.Prompt, def.Icons.Prompt)
-	cfg.Icons.Active = orDefault(cfg.Icons.Active, def.Icons.Active)
-	cfg.Icons.Selected = orDefault(cfg.Icons.Selected, def.Icons.Selected)
-	cfg.Icons.Warning = orDefault(cfg.Icons.Warning, def.Icons.Warning)
-	cfg.Icons.Separator = orDefault(cfg.Icons.Separator, def.Icons.Separator)
+	cfg.Colors = cfg.Colors.OrDefaults()
+	cfg.Icons = cfg.Icons.OrDefaults()
 	return cfg, nil
 }
 
-// DefaultIcons returns the built-in icon glyphs. Load backfills these for any
-// omitted key; callers that build a Config directly (e.g. tests) can use them.
-func DefaultIcons() Icons { return defaultConfig().Icons }
+// OrDefaults returns c with every empty field replaced by its built-in
+// default. Fields whose default is itself empty stay empty.
+func (c Colors) OrDefaults() Colors {
+	def := defaultConfig().Colors
+	return Colors{
+		SelectionBg:       orDefault(c.SelectionBg, def.SelectionBg),
+		SelectionFg:       orDefault(c.SelectionFg, def.SelectionFg),
+		ActiveColor:       orDefault(c.ActiveColor, def.ActiveColor),
+		PromptColor:       orDefault(c.PromptColor, def.PromptColor),
+		MatchColor:        orDefault(c.MatchColor, def.MatchColor),
+		StatusActiveColor: orDefault(c.StatusActiveColor, def.StatusActiveColor),
+		HelpKeyColor:      orDefault(c.HelpKeyColor, def.HelpKeyColor),
+		HelpDescColor:     orDefault(c.HelpDescColor, def.HelpDescColor),
+	}
+}
+
+// OrDefaults returns ic with every empty glyph replaced by its built-in default.
+func (ic Icons) OrDefaults() Icons {
+	def := defaultConfig().Icons
+	return Icons{
+		Project:   orDefault(ic.Project, def.Project),
+		Repo:      orDefault(ic.Repo, def.Repo),
+		Tmp:       orDefault(ic.Tmp, def.Tmp),
+		Prompt:    orDefault(ic.Prompt, def.Prompt),
+		Active:    orDefault(ic.Active, def.Active),
+		Selected:  orDefault(ic.Selected, def.Selected),
+		Warning:   orDefault(ic.Warning, def.Warning),
+		Separator: orDefault(ic.Separator, def.Separator),
+	}
+}
 
 // ansiCode renders a lipgloss 4-bit color constant (ansi.BasicColor, ~uint8) as
 // the string form the Colors fields expect: lipgloss.BrightBlack -> "8".

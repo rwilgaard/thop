@@ -8,17 +8,17 @@ import (
 
 func normalizeScores(scores map[string]float64) map[string]float64 {
 	out := make(map[string]float64, len(scores))
-	max := 0.0
+	maxScore := 0.0
 	for _, v := range scores {
-		if v > max {
-			max = v
+		if v > maxScore {
+			maxScore = v
 		}
 	}
-	if max == 0 {
+	if maxScore == 0 {
 		return out
 	}
 	for k, v := range scores {
-		out[k] = v / max
+		out[k] = v / maxScore
 	}
 	return out
 }
@@ -28,88 +28,75 @@ func combineScore(normFuzzyScore, normFrecency float64) float64 {
 	return normFuzzyScore*0.6 + normFrecency*0.4
 }
 
-func (m *model) scoreAndSort(pending []pendingItem) []scoredItem {
+// scoreAndSort takes items carrying raw fuzzy scores, normalizes them to
+// [0,1] within the set, blends in frecency, and sorts best-first.
+func (m *model) scoreAndSort(items []scoredItem) []scoredItem {
 	maxRaw := 0.0
-	for _, p := range pending {
-		if p.rawScore > maxRaw {
-			maxRaw = p.rawScore
+	for _, it := range items {
+		if it.score > maxRaw {
+			maxRaw = it.score
 		}
 	}
-	result := make([]scoredItem, 0, len(pending))
-	for _, p := range pending {
-		normF := 0.0
+	for i, it := range items {
+		normFuzzy := 0.0
 		if maxRaw > 0 {
-			normF = p.rawScore / maxRaw
+			normFuzzy = it.score / maxRaw
 		}
-		result = append(result, scoredItem{
-			base:    p.base,
-			score:   combineScore(normF, m.normFrec[p.base.candidate.AbsPath]),
-			matches: p.matches,
-		})
+		items[i].score = combineScore(normFuzzy, m.normFrec[it.base.candidate.AbsPath])
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		return result[i].score > result[j].score
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].score > items[j].score
 	})
-	return result
+	return items
 }
 
-func scrollWindow(cursor, maxRows, total int) (start, end int) {
-	if cursor >= maxRows {
-		start = cursor - maxRows + 1
-	}
-	end = min(start+maxRows, total)
-	return
-}
-
-func (m *model) rebuildFiltered() {
-	query := m.tiQuery.Value()
-	var result []scoredItem
-
+// filterScored ranks pool against query: fuzzy+frecency blend for a non-empty
+// query, frecency alone otherwise.
+func (m *model) filterScored(pool []baseItem, query string) []scoredItem {
 	if query == "" {
-		for _, item := range m.all {
-			if m.switchOnly && !item.active {
-				continue
-			}
-			if !m.matchesView(item) {
-				continue
-			}
-			result = append(result, scoredItem{
-				base:  item,
-				score: m.normFrec[item.candidate.AbsPath],
-			})
+		result := make([]scoredItem, 0, len(pool))
+		for _, item := range pool {
+			result = append(result, scoredItem{base: item, score: m.normFrec[item.candidate.AbsPath]})
 		}
 		sort.SliceStable(result, func(i, j int) bool {
 			return result[i].score > result[j].score
 		})
-	} else {
-		// fuzzy match on RelPath — avoids ANSI escape codes in display strings
-		keys := make([]string, len(m.all))
-		for i, item := range m.all {
-			keys[i] = item.candidate.RelPath
-		}
-		var pending []pendingItem
-		for _, match := range fuzzy.Find(query, keys) {
-			item := m.all[match.Index]
-			if m.switchOnly && !item.active {
-				continue
-			}
-			if !m.matchesView(item) {
-				continue
-			}
-			pending = append(pending, pendingItem{base: item, rawScore: float64(match.Score), matches: match.MatchedIndexes})
-		}
-		result = m.scoreAndSort(pending)
+		return result
 	}
+	// fuzzy match on RelPath — avoids ANSI escape codes in display strings
+	keys := make([]string, len(pool))
+	for i, item := range pool {
+		keys[i] = item.candidate.RelPath
+	}
+	var result []scoredItem
+	for _, match := range fuzzy.Find(query, keys) {
+		result = append(result, scoredItem{
+			base:    pool[match.Index],
+			score:   float64(match.Score),
+			matches: match.MatchedIndexes,
+		})
+	}
+	return m.scoreAndSort(result)
+}
 
-	m.filtered = result
+func (m *model) rebuildFiltered() {
+	pool := make([]baseItem, 0, len(m.all))
+	for _, item := range m.all {
+		if m.switchOnly && !item.active {
+			continue
+		}
+		if !m.matchesView(item) {
+			continue
+		}
+		pool = append(pool, item)
+	}
+	m.filtered = m.filterScored(pool, m.tiQuery.Value())
 	if m.cursor >= len(m.filtered) {
 		m.cursor = 0
 	}
 }
 
 func (m *model) rebuildDestFiltered() {
-	destQuery := m.tiDest.Value()
-
 	// pool: non-repo candidates from m.all (projects + tmp projects)
 	pool := make([]baseItem, 0, len(m.all))
 	for _, item := range m.all {
@@ -117,51 +104,32 @@ func (m *model) rebuildDestFiltered() {
 			pool = append(pool, item)
 		}
 	}
-
-	var result []scoredItem
-	if destQuery == "" {
-		for _, item := range pool {
-			result = append(result, scoredItem{base: item, score: m.normFrec[item.candidate.AbsPath]})
-		}
-		sort.SliceStable(result, func(i, j int) bool { return result[i].score > result[j].score })
-	} else {
-		keys := make([]string, len(pool))
-		for i, item := range pool {
-			keys[i] = item.candidate.RelPath
-		}
-		var pending []pendingItem
-		for _, match := range fuzzy.Find(destQuery, keys) {
-			pending = append(pending, pendingItem{base: pool[match.Index], rawScore: float64(match.Score), matches: match.MatchedIndexes})
-		}
-		result = m.scoreAndSort(pending)
-	}
-	m.destFiltered = result
-	if m.destCursor >= len(m.destFiltered) {
-		m.destCursor = 0
+	m.clone.destFiltered = m.filterScored(pool, m.clone.tiDest.Value())
+	if m.clone.destCursor >= len(m.clone.destFiltered) {
+		m.clone.destCursor = 0
 	}
 }
 
 func (m *model) rebuildCleanFiltered() {
 	all := m.tmpItems()
-	query := m.tiClean.Value()
+	query := m.clean.tiQuery.Value()
 	if query == "" {
-		m.cleanFiltered = make([]scoredItem, len(all))
+		m.clean.filtered = make([]scoredItem, len(all))
 		for i, item := range all {
-			m.cleanFiltered[i] = scoredItem{base: item}
+			m.clean.filtered[i] = scoredItem{base: item}
 		}
 	} else {
 		keys := make([]string, len(all))
 		for i, item := range all {
 			keys[i] = item.candidate.RelPath
 		}
-		matches := fuzzy.Find(query, keys)
-		m.cleanFiltered = nil
-		for _, match := range matches {
-			m.cleanFiltered = append(m.cleanFiltered, scoredItem{base: all[match.Index], matches: match.MatchedIndexes})
+		m.clean.filtered = nil
+		for _, match := range fuzzy.Find(query, keys) {
+			m.clean.filtered = append(m.clean.filtered, scoredItem{base: all[match.Index], matches: match.MatchedIndexes})
 		}
 	}
-	if m.cleanCursor >= len(m.cleanFiltered) {
-		m.cleanCursor = 0
+	if m.clean.cursor >= len(m.clean.filtered) {
+		m.clean.cursor = 0
 	}
 }
 

@@ -121,14 +121,3 @@ func TestCaretLabel(t *testing.T) {
 		t.Errorf("caretLabel(Repos) = %q, want %q (caret form only for plain ctrl)", got, "ctrl-shift-x")
 	}
 }
-
-func TestBuildHelpGroups(t *testing.T) {
-	km := buildKeyMap(config.Config{})
-	groups := buildHelpGroups(km)
-	if len(groups) != 3 {
-		t.Fatalf("len(groups) = %d, want 3", len(groups))
-	}
-	if groups[0].title != "Navigate" {
-		t.Errorf("groups[0].title = %q, want %q", groups[0].title, "Navigate")
-	}
-}

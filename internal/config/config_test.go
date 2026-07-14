@@ -34,6 +34,9 @@ func TestLoad_missingConfig(t *testing.T) {
 	if cfg.Colors.SelectionBg == "" {
 		t.Error("expected default SelectionBg")
 	}
+	if cfg.Popup.Width != "60%" || cfg.Popup.Height != "50%" {
+		t.Errorf("Popup = %+v, want default 60%%/50%%", cfg.Popup)
+	}
 	// example config file created
 	if _, err := os.Stat(filepath.Join(dir, "thop", "config.yaml")); err != nil {
 		t.Errorf("expected example config to be created: %v", err)
@@ -144,20 +147,6 @@ func TestLoad_tmpPathDefault(t *testing.T) {
 	want := filepath.Join(cache, "thop", "tmp")
 	if cfg.TmpPath != want {
 		t.Errorf("TmpPath = %q, want %q", cfg.TmpPath, want)
-	}
-}
-
-func TestLoad_popupDefaults(t *testing.T) {
-	dir := t.TempDir()
-	cfg, err := Load(dir, t.TempDir(), t.TempDir())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.Popup.Width != "60%" {
-		t.Errorf("Popup.Width = %q, want %q", cfg.Popup.Width, "60%")
-	}
-	if cfg.Popup.Height != "50%" {
-		t.Errorf("Popup.Height = %q, want %q", cfg.Popup.Height, "50%")
 	}
 }
 

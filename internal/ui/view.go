@@ -18,6 +18,22 @@ type listRow struct {
 	matches []int
 }
 
+func toListRows(items []scoredItem) []listRow {
+	rows := make([]listRow, len(items))
+	for i, it := range items {
+		rows[i] = listRow{item: it.base, matches: it.matches}
+	}
+	return rows
+}
+
+func scrollWindow(cursor, maxRows, total int) (start, end int) {
+	if cursor >= maxRows {
+		start = cursor - maxRows + 1
+	}
+	end = min(start+maxRows, total)
+	return
+}
+
 type listOpts struct {
 	cursor     int
 	maxRows    int
@@ -50,17 +66,17 @@ func nonRepoCount(items []baseItem) int {
 
 // renderRows renders the visible scroll window, or emptyMsg when there are no
 // rows. reversed flips the window so index start renders last (bottom layout).
-func renderRows(rows []listRow, o listOpts) []string {
+func (st styles) renderRows(rows []listRow, o listOpts) []string {
 	if len(rows) == 0 {
 		if o.emptyMsg == "" {
 			return nil
 		}
-		return []string{leftPad + styleSep.Render(o.emptyMsg)}
+		return []string{leftPad + st.sep.Render(o.emptyMsg)}
 	}
 	start, end := scrollWindow(o.cursor, o.maxRows, len(rows))
 	out := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		out = append(out, renderRow(rows[i], i == o.cursor, o))
+		out = append(out, st.renderRow(rows[i], i == o.cursor, o))
 	}
 	if o.reversed {
 		slices.Reverse(out)
@@ -81,7 +97,7 @@ func fillRows(lines []string, maxRows int, bottom bool) []string {
 	return append(lines, blanks...)
 }
 
-// renderName styles name, highlighting matched byte offsets in styleMatch runs.
+// renderName styles name, highlighting matched byte offsets in match-style runs.
 // matches must be rune-start byte offsets as produced by fuzzy.Find; mid-rune offsets are ignored.
 func renderName(name string, matches []int, base, match lipgloss.Style) string {
 	if len(matches) == 0 {
@@ -116,32 +132,32 @@ func renderName(name string, matches []int, base, match lipgloss.Style) string {
 	return sb.String()
 }
 
-func renderRow(row listRow, isCursor bool, o listOpts) string {
+func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 	c := row.item.candidate
-	glyph, glyphColor := candidates.Icon(c, icons)
+	glyph, glyphColor := iconFor(c, st.icons)
 
 	prefix := leftPad
 	if o.selected != nil && o.selected[c.AbsPath] {
-		prefix = glyphSelect
+		prefix = st.icons.Selected
 	}
 
 	iconStyle := lipgloss.NewStyle().Foreground(glyphColor)
 	nameStyle := lipgloss.NewStyle()
 	if c.IsTmp {
-		nameStyle = styleTmpName
+		nameStyle = st.tmpName
 	}
 	sp := " "
 	if isCursor {
-		bg := styleSelected.GetBackground()
+		bg := st.selected.GetBackground()
 		iconStyle = iconStyle.Background(bg).Bold(true)
-		nameStyle = styleSelected
-		prefix = styleSelected.Render(prefix)
-		sp = styleSelected.Render(sp)
+		nameStyle = st.selected
+		prefix = st.selected.Render(prefix)
+		sp = st.selected.Render(sp)
 	}
 
-	matchStyle := styleMatch
+	matchStyle := st.match
 	if isCursor {
-		matchStyle = matchStyle.Background(styleSelected.GetBackground())
+		matchStyle = matchStyle.Background(st.selected.GetBackground())
 	}
 	name := renderName(c.RelPath, row.matches, nameStyle, matchStyle)
 
@@ -150,17 +166,17 @@ func renderRow(row listRow, isCursor bool, o listOpts) string {
 	var right string
 	if showActive {
 		if isCursor {
-			right = styleSelectedActive.Render(activeLabel)
+			right = st.selectedActive.Render(st.activeLabel)
 		} else {
-			right = styleDimActive.Render(activeLabel)
+			right = st.dimActive.Render(st.activeLabel)
 		}
-		rightW = lipgloss.Width(activeLabel)
+		rightW = lipgloss.Width(st.activeLabel)
 	}
 	contentW := 1 + lipgloss.Width(glyph) + 1 + lipgloss.Width(c.RelPath)
 	pad := max(1, o.width-1-contentW-rightW)
 	padStr := strings.Repeat(" ", pad)
 	if isCursor {
-		padStr = styleSelected.Render(padStr)
+		padStr = st.selected.Render(padStr)
 	}
 	return prefix + iconStyle.Render(glyph) + sp + name + padStr + right
 }
@@ -178,18 +194,18 @@ func joinCols(cols []string, gap string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-func renderHelpOverlay(width int, groups []helpGroup) string {
+func (st styles) renderHelpOverlay(width int, groups []helpGroup) string {
 	cols := make([]string, 0, len(groups))
 	for _, g := range groups {
 		maxKey := 0
 		for _, b := range g.keys {
 			maxKey = max(maxKey, lipgloss.Width(b.Help().Key))
 		}
-		lines := []string{styleSep.Render(g.title)}
+		lines := []string{st.sep.Render(g.title)}
 		for _, b := range g.keys {
 			h := b.Help()
 			pad := strings.Repeat(" ", maxKey-lipgloss.Width(h.Key)+2)
-			lines = append(lines, styleHelpKey.Render(h.Key)+pad+styleHelpDesc.Render(h.Desc))
+			lines = append(lines, st.helpKey.Render(h.Key)+pad+st.helpDesc.Render(h.Desc))
 		}
 		cols = append(cols, strings.Join(lines, "\n"))
 	}
@@ -205,55 +221,56 @@ func renderHelpOverlay(width int, groups []helpGroup) string {
 }
 
 func (m model) searchLine(width int) string {
+	prompt := m.st.icons.Prompt
 	switch m.inputMode {
 	case modeLoading:
-		return leftPad + m.spin.View() + " " + styleSep.Render(m.loadingText)
+		return leftPad + m.spin.View() + " " + m.st.sep.Render(m.loadingText)
 	case modeError:
-		hints := keyHints([][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}})
-		label := styleSep.Render(glyphWarning + "  ")
+		hints := m.st.keyHints([][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}})
+		label := m.st.sep.Render(m.st.icons.Warning + "  ")
 		return inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
 	case modeURLInput:
-		hints := keyHints([][2]string{{"enter", "Clone"}, {"esc", "Cancel"}})
-		return inputRow(stylePrompt.Render("Clone repository "+glyphPrompt+" "), m.tiURL.View(), hints, width)
+		hints := m.st.keyHints([][2]string{{"enter", "Clone"}, {"esc", "Cancel"}})
+		return inputRow(m.st.prompt.Render("Clone repository "+prompt+" "), m.clone.tiURL.View(), hints, width)
 	case modeNameInput:
-		hints := keyHints([][2]string{{"enter", "Create"}, {"esc", "Cancel"}})
-		label := stylePrompt.Render("New tmp project " + glyphPrompt + " ")
-		tiView := m.tiName.View()
+		hints := m.st.keyHints([][2]string{{"enter", "Create"}, {"esc", "Cancel"}})
+		label := m.st.prompt.Render("New tmp project " + prompt + " ")
+		tiView := m.tmp.tiName.View()
 		var hint string
 		switch {
-		case m.nameConflict && invalidTmpName(m.tiName.Value()):
-			hint = styleSep.Render(" (Invalid name)")
-		case m.nameConflict:
-			hint = styleSep.Render(" (Already exists — enter opens it)")
+		case m.tmp.conflict && !candidates.ValidTmpName(m.tmp.tiName.Value()):
+			hint = m.st.sep.Render(" (Invalid name)")
+		case m.tmp.conflict:
+			hint = m.st.sep.Render(" (Already exists — enter opens it)")
 		}
 		return inputRow(label, tiView+hint, hints, width)
 	case modeCleanTmp:
-		hints := keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
-		return inputRow(stylePrompt.Render("Delete tmp projects "+glyphPrompt+" "), m.tiClean.View(), hints, width)
+		hints := m.st.keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
+		return inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(), hints, width)
 	case modeConfirmClean:
-		n := len(m.selected)
+		n := len(m.clean.selected)
 		if n == 0 {
-			n = len(m.cleanFiltered)
+			n = len(m.clean.filtered)
 		}
 		noun := "projects"
 		if n == 1 {
 			noun = "project"
 		}
-		yn := styleSep.Render(" [y/N]")
-		return leftPad + stylePrompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
+		yn := m.st.sep.Render(" [y/N]")
+		return leftPad + m.st.prompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
 	case modeDestPicker:
-		hints := keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
-		return inputRow(stylePrompt.Render("Clone › Destination "+glyphPrompt+" "), m.tiDest.View(), hints, width)
+		hints := m.st.keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
+		return inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(), hints, width)
 	case modeCloneName:
-		hints := keyHints([][2]string{{"enter", "Clone as"}, {"esc", "Back"}})
-		return inputRow(stylePrompt.Render("Clone › Name conflict "+glyphPrompt+" "), m.tiCloneName.View(), hints, width)
+		hints := m.st.keyHints([][2]string{{"enter", "Clone as"}, {"esc", "Back"}})
+		return inputRow(m.st.prompt.Render("Clone › Name conflict "+prompt+" "), m.clone.tiName.View(), hints, width)
 	default:
-		label := stylePrompt.Render(glyphPrompt + " ")
+		label := m.st.prompt.Render(prompt + " ")
 		tiView := m.tiQuery.View()
 		if m.showHelp {
 			return leftPad + label + tiView
 		}
-		hints := keyHints([][2]string{
+		hints := m.st.keyHints([][2]string{
 			{m.keys.Enter.Help().Key, "Open"},
 			{m.keys.Clone.Help().Key, "Clone"},
 			{m.keys.Help.Help().Key, "Help"},
@@ -273,63 +290,51 @@ func (m model) bodyLines(width, maxRows int) []string {
 		}
 		var lines []string
 		for _, line := range strings.Split(parts[1], "\n") {
-			lines = append(lines, leftPad+styleSep.Render(line))
+			lines = append(lines, leftPad+m.st.sep.Render(line))
 		}
 		return lines
 	case m.showHelp:
 		var lines []string
-		for _, line := range strings.Split(renderHelpOverlay(width, buildHelpGroups(m.keys)), "\n") {
+		for _, line := range strings.Split(m.st.renderHelpOverlay(width, buildHelpGroups(m.keys)), "\n") {
 			lines = append(lines, leftPad+line)
 		}
 		return lines
 	case m.inputMode == modeCloneName:
-		conflict := filepath.Join(m.cloneDestDir, git.RepoNameFromURL(m.tiURL.Value()))
-		return []string{leftPad + styleSep.Render(glyphWarning+" Already exists: "+conflict)}
+		conflict := filepath.Join(m.clone.destDir, git.RepoNameFromURL(m.clone.tiURL.Value()))
+		return []string{leftPad + m.st.sep.Render(m.st.icons.Warning+" Already exists: "+conflict)}
 	case m.inputMode == modeCleanTmp:
-		rows := make([]listRow, len(m.cleanFiltered))
-		for i, it := range m.cleanFiltered {
-			rows[i] = listRow{item: it.base, matches: it.matches}
-		}
-		return renderRows(rows, listOpts{
-			cursor: m.cleanCursor, maxRows: maxRows, width: width,
-			selected: m.selected,
-			emptyMsg: emptyMsg(m.tiClean.Value(), len(m.tmpItems())),
+		return m.st.renderRows(toListRows(m.clean.filtered), listOpts{
+			cursor: m.clean.cursor, maxRows: maxRows, width: width,
+			selected: m.clean.selected,
+			emptyMsg: emptyMsg(m.clean.tiQuery.Value(), len(m.tmpItems())),
 			reversed: m.layoutBottom,
 		})
 	case m.inputMode == modeConfirmClean:
 		var toDelete []baseItem
-		if len(m.selected) > 0 {
+		if len(m.clean.selected) > 0 {
 			for _, item := range m.tmpItems() {
-				if m.selected[item.candidate.AbsPath] {
+				if m.clean.selected[item.candidate.AbsPath] {
 					toDelete = append(toDelete, item)
 				}
 			}
 		} else {
-			for _, it := range m.cleanFiltered {
+			for _, it := range m.clean.filtered {
 				toDelete = append(toDelete, it.base)
 			}
 		}
-		lines := []string{leftPad + styleSep.Render("Will delete:")}
+		lines := []string{leftPad + m.st.sep.Render("Will delete:")}
 		for _, item := range toDelete {
-			lines = append(lines, renderRow(listRow{item: item}, false, listOpts{width: width}))
+			lines = append(lines, m.st.renderRow(listRow{item: item}, false, listOpts{width: width}))
 		}
 		return lines
 	case m.inputMode == modeDestPicker:
-		rows := make([]listRow, len(m.destFiltered))
-		for i, it := range m.destFiltered {
-			rows[i] = listRow{item: it.base, matches: it.matches}
-		}
-		return renderRows(rows, listOpts{
-			cursor: m.destCursor, maxRows: maxRows, width: width,
-			emptyMsg: emptyMsg(m.tiDest.Value(), nonRepoCount(m.all)),
+		return m.st.renderRows(toListRows(m.clone.destFiltered), listOpts{
+			cursor: m.clone.destCursor, maxRows: maxRows, width: width,
+			emptyMsg: emptyMsg(m.clone.tiDest.Value(), nonRepoCount(m.all)),
 			reversed: m.layoutBottom,
 		})
 	default:
-		rows := make([]listRow, len(m.filtered))
-		for i, it := range m.filtered {
-			rows[i] = listRow{item: it.base, matches: it.matches}
-		}
-		return renderRows(rows, listOpts{
+		return m.st.renderRows(toListRows(m.filtered), listOpts{
 			cursor: m.cursor, maxRows: maxRows, width: width,
 			showActive: true,
 			emptyMsg:   emptyMsg(m.tiQuery.Value(), len(m.all)),
@@ -354,7 +359,7 @@ func (m model) View() tea.View {
 	// height budget: search + top-sep + bottom-sep + status = 4
 	maxRows := max(5, height-4)
 	body := fillRows(m.bodyLines(width, maxRows), maxRows, m.layoutBottom)
-	sepLine := leftPad + styleSep.Render(strings.Repeat(glyphSep, max(0, width-2)))
+	sepLine := leftPad + m.st.sep.Render(strings.Repeat(m.st.icons.Separator, max(0, width-2)))
 
 	var sb strings.Builder
 	writeLine := func(l string) {
@@ -384,8 +389,8 @@ func (m model) View() tea.View {
 }
 
 // modePill renders the current mode name as a filled badge for the status bar.
-func modePill(label string) string {
-	return styleStatusPill.Render(" " + label + " ")
+func (st styles) modePill(label string) string {
+	return st.statusPill.Render(" " + label + " ")
 }
 
 // clampWidth truncates a status/search line so it can never exceed the frame
@@ -422,14 +427,14 @@ func (m model) filterTabs(keyFn func(key.Binding) string, sep string) string {
 		if i > 0 {
 			sb.WriteString(sep)
 		}
-		sb.WriteString(stylePrompt.Render(keyFn(t.binding)))
+		sb.WriteString(m.st.prompt.Render(keyFn(t.binding)))
 		sb.WriteString(" ")
 		// Active filter is just colored text — no background pill. Bare labels
 		// keep active and inactive the same width, so nothing shifts on switch.
 		if m.view == t.mode {
-			sb.WriteString(styleFilterActive.Render(t.label))
+			sb.WriteString(m.st.filterActive.Render(t.label))
 		} else {
-			sb.WriteString(styleSep.Render(t.label))
+			sb.WriteString(m.st.sep.Render(t.label))
 		}
 	}
 	return sb.String()
@@ -439,26 +444,26 @@ func (m model) statusBar(width int) string {
 	var left, right string
 	switch m.inputMode {
 	case modeDestPicker:
-		left = modePill("Clone") + "  " + styleSep.Render(m.tiURL.Value())
-		right = styleSep.Render(fmt.Sprintf("%d items", len(m.destFiltered)))
+		left = m.st.modePill("Clone") + "  " + m.st.sep.Render(m.clone.tiURL.Value())
+		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.clone.destFiltered)))
 	case modeCleanTmp, modeConfirmClean:
-		left = modePill("Clean") + "  " + styleSep.Render(fmt.Sprintf("%d selected", len(m.selected)))
-		right = styleSep.Render(fmt.Sprintf("%d items", len(m.cleanFiltered)))
+		left = m.st.modePill("Clean") + "  " + m.st.sep.Render(fmt.Sprintf("%d selected", len(m.clean.selected)))
+		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.clean.filtered)))
 	case modeURLInput, modeCloneName:
-		left = modePill("Clone")
+		left = m.st.modePill("Clone")
 	case modeNameInput:
-		left = modePill("New tmp")
+		left = m.st.modePill("New tmp")
 	case modeLoading:
-		left = styleSep.Render(m.loadingText)
+		left = m.st.sep.Render(m.loadingText)
 	case modeError:
-		left = modePill("Error")
+		left = m.st.modePill("Error")
 	default:
-		right = styleSep.Render(fmt.Sprintf("%d items", len(m.filtered)))
-		badge := modePill("Filter") + "  "
+		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.filtered)))
+		badge := m.st.modePill("Filter") + "  "
 		// Prefer spelled keys (<ctrl-a>) with bullet separators to match the
 		// other hint rows; fall back to compact carets (^A) when the row
 		// would overflow.
-		left = badge + m.filterTabs(spelledKey, styleSep.Render(" • "))
+		left = badge + m.filterTabs(spelledKey, m.st.sep.Render(" • "))
 		if lipgloss.Width(left)+lipgloss.Width(right) > width-2 {
 			left = badge + m.filterTabs(caretLabel, "  ")
 		}
