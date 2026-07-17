@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -458,7 +459,14 @@ func (m model) statusBar(width int) string {
 	case modeError:
 		left = m.st.modePill("Error")
 	default:
-		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.filtered)))
+		count := fmt.Sprintf("%d items", len(m.filtered))
+		timeStr := ""
+		if len(m.filtered) > 0 {
+			if ts, ok := m.lastOpened[m.filtered[m.cursor].base.candidate.AbsPath]; ok {
+				timeStr = "opened " + humanizeSince(ts) + " · "
+			}
+		}
+		right = m.st.sep.Render(timeStr + count)
 		badge := m.st.modePill("Filter") + "  "
 		// Prefer spelled keys (<ctrl-a>) with bullet separators to match the
 		// other hint rows; fall back to compact carets (^A) when the row
@@ -467,8 +475,31 @@ func (m model) statusBar(width int) string {
 		if lipgloss.Width(left)+lipgloss.Width(right) > width-2 {
 			left = badge + m.filterTabs(caretLabel, "  ")
 		}
+		// Still overflowing → drop the time hint, keep the count.
+		if timeStr != "" && lipgloss.Width(left)+lipgloss.Width(right) > width-2 {
+			right = m.st.sep.Render(count)
+		}
 	}
 	pad := max(1, width-2-lipgloss.Width(left)-lipgloss.Width(right))
 	// no trailing newline: would scroll the terminal, shifting the search bar off screen
 	return leftPad + left + strings.Repeat(" ", pad) + right
+}
+
+// humanizeSince formats the gap between now and ts as a terse relative string.
+func humanizeSince(ts int64) string {
+	age := time.Now().Unix() - ts
+	switch {
+	case age < 60:
+		return "just now"
+	case age < 3600:
+		return fmt.Sprintf("%dm ago", age/60)
+	case age < 86400:
+		return fmt.Sprintf("%dh ago", age/3600)
+	case age < 604800:
+		return fmt.Sprintf("%dd ago", age/86400)
+	case age < 2592000:
+		return fmt.Sprintf("%dw ago", age/604800)
+	default:
+		return fmt.Sprintf("%dmo ago", age/2592000)
+	}
 }

@@ -121,3 +121,30 @@ func TestRecord_concurrent(t *testing.T) {
 		t.Errorf("visits = %d, want %d", entries["foo/bar"].visits, n)
 	}
 }
+
+func TestLoadTimes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "history")
+	// path \t visits \t lastTs
+	data := "/a/repo\t3\t1000\n/b/proj\t1\t2000\n"
+	if err := os.WriteFile(file, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	times, err := LoadTimes(file)
+	if err != nil {
+		t.Fatalf("LoadTimes: %v", err)
+	}
+	if times["/a/repo"] != 1000 || times["/b/proj"] != 2000 {
+		t.Fatalf("got %v", times)
+	}
+}
+
+func TestLoadTimesMissingFile(t *testing.T) {
+	times, err := LoadTimes(filepath.Join(t.TempDir(), "nope"))
+	if err != nil {
+		t.Fatalf("want nil err, got %v", err)
+	}
+	if times == nil || len(times) != 0 {
+		t.Fatalf("want empty non-nil map, got %v", times)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -995,5 +996,49 @@ func TestTopLayout_cursor(t *testing.T) {
 	m = updated.(model)
 	if m.cursor != 0 {
 		t.Errorf("top layout: up should return to index 0, got %d", m.cursor)
+	}
+}
+
+func TestStatusBarShowsLastOpened(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/x/alpha", RelPath: "alpha"},
+	}
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.lastOpened = map[string]int64{"/x/alpha": time.Now().Unix() - 2*86400}
+	m.rebuildFiltered()
+	m.cursor = 0
+
+	got := m.statusBar(80)
+	if !strings.Contains(got, "opened 2d ago") {
+		t.Fatalf("status bar missing time hint: %q", got)
+	}
+
+	// No history for the cursor row → count only, no "opened".
+	m.lastOpened = map[string]int64{}
+	if got := m.statusBar(80); strings.Contains(got, "opened") {
+		t.Fatalf("status bar should omit time when no history: %q", got)
+	}
+}
+
+func TestHumanizeSince(t *testing.T) {
+	now := time.Now().Unix()
+	cases := []struct {
+		name   string
+		offset int64
+		want   string
+	}{
+		{"just now", 10, "just now"},
+		{"minutes", 5 * 60, "5m ago"},
+		{"hours", 3 * 3600, "3h ago"},
+		{"days", 2 * 86400, "2d ago"},
+		{"weeks", 2 * 604800, "2w ago"},
+		{"months", 90 * 86400, "3mo ago"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := humanizeSince(now - tc.offset); got != tc.want {
+				t.Fatalf("humanizeSince(-%ds) = %q, want %q", tc.offset, got, tc.want)
+			}
+		})
 	}
 }

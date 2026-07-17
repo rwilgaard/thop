@@ -115,11 +115,12 @@ func main() {
 		tmpCands      []candidates.Candidate
 		tmuxState     tmux.State
 		scores        map[string]float64
+		times         map[string]int64
 		candidatesErr error
 		frecencyErr   error
 		wg            sync.WaitGroup
 	)
-	wg.Add(4)
+	wg.Add(5)
 	go func() {
 		defer wg.Done()
 		static, candidatesErr = candidates.LoadCandidates(cfg.Paths, cacheFile)
@@ -136,6 +137,10 @@ func main() {
 		defer wg.Done()
 		tmpCands = candidates.LoadTmp(cfg.TmpPath)
 	}()
+	go func() {
+		defer wg.Done()
+		times, _ = frecency.LoadTimes(frecencyFile)
+	}()
 	wg.Wait()
 
 	if candidatesErr != nil {
@@ -145,7 +150,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
 	}
 
-	result, err := ui.Run(append(static, tmpCands...), scores, tmuxState, *switchOnly, cfg, inTmux)
+	result, err := ui.Run(append(static, tmpCands...), scores, times, tmuxState, *switchOnly, cfg, inTmux)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "thop:", err)
 		return

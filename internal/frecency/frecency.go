@@ -50,6 +50,20 @@ func Load(file string) (map[string]float64, error) {
 	return scores, nil
 }
 
+// LoadTimes reads the history file and returns last-access unix timestamps per path.
+// The map is non-nil even on error, so callers can use it directly.
+func LoadTimes(file string) (map[string]int64, error) {
+	entries, err := readEntries(file)
+	if err != nil {
+		return map[string]int64{}, err
+	}
+	times := make(map[string]int64, len(entries))
+	for path, e := range entries {
+		times[path] = e.lastTs
+	}
+	return times, nil
+}
+
 // Record increments the visit count and updates the last-access timestamp for relPath.
 // A flock on a sidecar file serializes concurrent thop instances so no
 // read-modify-write cycle loses updates.

@@ -106,6 +106,7 @@ type cleanFlow struct {
 type model struct {
 	all        []baseItem
 	normFrec   map[string]float64
+	lastOpened map[string]int64
 	filtered   []scoredItem
 	tiQuery    textinput.Model // modeNormal search
 	cursor     int
@@ -258,8 +259,10 @@ func runProgram(m model) (Result, error) {
 	return Result{}, nil
 }
 
-func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
-	return runProgram(newModel(cs, scores, ts, switchOnly, cfg, inTmux))
+func Run(cs []candidates.Candidate, scores map[string]float64, times map[string]int64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
+	m := newModel(cs, scores, ts, switchOnly, cfg, inTmux)
+	m.lastOpened = times
+	return runProgram(m)
 }
 
 func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
