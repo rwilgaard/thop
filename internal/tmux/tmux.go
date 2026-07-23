@@ -94,6 +94,18 @@ func exact(session string) string {
 	return "=" + session
 }
 
+// targetWindow returns a tmux target path.
+// If the window name has a dot, we replace it with '?' to stop tmux
+// from splitting the name as window.pane. We can't use '=' because it
+// disables wildcards.
+func targetWindow(session, window string) string {
+	if strings.Contains(window, ".") {
+		searchTarget := strings.ReplaceAll(window, ".", "?")
+		return exact(session) + ":" + searchTarget
+	}
+	return exact(session) + ":=" + window
+}
+
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -112,8 +124,8 @@ func newSession(session, startDir, windowName string) error {
 }
 
 func openRepoWindow(session, repoPath string) error {
-	// Use "=name" prefix for exact-match to avoid tmux parsing dots as window.pane.
-	if err := tmuxRun("select-window", "-t", exact(session)+":="+filepath.Base(repoPath)); err != nil {
+	windowName := filepath.Base(repoPath)
+	if err := tmuxRun("select-window", "-t", targetWindow(session, windowName)); err != nil {
 		return newWindow(session, repoPath)
 	}
 	return nil
