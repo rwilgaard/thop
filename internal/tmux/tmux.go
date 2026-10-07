@@ -195,7 +195,8 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func switchTo(session string) error {
+// switchTo is a variable so tests can run without an attached client.
+var switchTo = func(session string) error {
 	if os.Getenv("TMUX") == "" {
 		cmd := exec.Command("tmux", "attach-session", "-t", exact(session))
 		cmd.Stdin = os.Stdin
