@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -779,14 +780,18 @@ func TestConfirmClean_pluralization(t *testing.T) {
 	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 	m.inputMode = modeConfirmClean
+	m.all = []baseItem{
+		{candidate: cand.Candidate{AbsPath: "/t/a", RelPath: "a", IsTmp: true}},
+		{candidate: cand.Candidate{AbsPath: "/t/b", RelPath: "b", IsTmp: true}, active: true},
+	}
 
 	m.clean.selected = map[string]bool{"/t/a": true}
 	if out := m.View().Content; !strings.Contains(out, "Delete 1 tmp project?") {
 		t.Errorf("singular form missing: %q", out)
 	}
 	m.clean.selected = map[string]bool{"/t/a": true, "/t/b": true}
-	if out := m.View().Content; !strings.Contains(out, "Delete 2 tmp projects?") {
-		t.Errorf("plural form missing: %q", out)
+	if out := m.View().Content; !strings.Contains(out, "Delete 2 tmp projects (1 open)?") {
+		t.Errorf("plural form with open count missing: %q", out)
 	}
 }
 
@@ -995,5 +1000,180 @@ func TestTopLayout_cursor(t *testing.T) {
 	m = updated.(model)
 	if m.cursor != 0 {
 		t.Errorf("top layout: up should return to index 0, got %d", m.cursor)
+	}
+}
+
+func TestEnter_emptyListStays(t *testing.T) {
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	tests := []struct {
+		name string
+		mode inputMode
+	}{
+		{"picker", modeNormal},
+		{"dest picker", modeDestPicker},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+			m.inputMode = tt.mode
+			updated, cmd := m.Update(enter)
+			if cmd != nil {
+				t.Error("enter on an empty list should do nothing")
+			}
+			if got := updated.(model).inputMode; got != tt.mode {
+				t.Errorf("mode changed to %v", got)
+			}
+		})
+	}
+}
+
+func TestTruncateName(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		matches     []int
+		maxW        int
+		want        string
+		wantMatches []int
+	}{
+		{"fits", "abc", []int{0, 2}, 3, "abc", []int{0, 2}},
+		{"cut", "abcdef", []int{0, 4}, 4, "abc…", []int{0}},
+		{"multibyte", "æøåabc", []int{0, 2}, 3, "æø…", []int{0, 2}},
+		{"no room", "abc", nil, 0, "…", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotMatches := truncateName(tt.in, tt.matches, tt.maxW)
+			if got != tt.want {
+				t.Errorf("name = %q, want %q", got, tt.want)
+			}
+			if len(gotMatches) != len(tt.wantMatches) {
+				t.Fatalf("matches = %v, want %v", gotMatches, tt.wantMatches)
+			}
+			for i := range gotMatches {
+				if gotMatches[i] != tt.wantMatches[i] {
+					t.Errorf("matches = %v, want %v", gotMatches, tt.wantMatches)
+				}
+			}
+		})
+	}
+}
+
+func TestView_longRowsFitWidth(t *testing.T) {
+	long := strings.Repeat("very-long-name-", 10)
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.all = []baseItem{
+		{candidate: cand.Candidate{AbsPath: "/p/a", RelPath: long}, active: true, current: true},
+		{candidate: cand.Candidate{AbsPath: "/p/b", RelPath: long + "b"}},
+	}
+	m.rebuildFiltered()
+	m.width, m.height, m.ready = 40, 12, true
+
+	out := m.View().Content
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d is %d cells wide, frame is %d", i, w, m.width)
+		}
+	}
+	if !strings.Contains(out, "current") {
+		t.Error("truncated row lost its label")
+	}
+}
+
+func TestRebuildFiltered_sessionOrder(t *testing.T) {
+	ts := tmux.State{
+		Sessions:      map[string]bool{"here": true, "before": true, "group": true},
+		Windows:       map[string]bool{"group/repo": true},
+		Current:       "here",
+		CurrentWindow: "zsh",
+		Last:          "before",
+	}
+	cs := []cand.Candidate{
+		{AbsPath: "/p/here", RelPath: "here"},
+		{AbsPath: "/p/top", RelPath: "top"},
+		{AbsPath: "/p/before", RelPath: "before"},
+		{AbsPath: "/p/group/repo", RelPath: "group/repo", IsRepo: true},
+	}
+	scores := map[string]float64{"/p/here": 9, "/p/top": 5, "/p/group/repo": 2, "/p/before": 1}
+	m := newModel(cs, scores, ts, false, config.Config{}, false)
+
+	order := func() []string {
+		var out []string
+		for _, it := range m.filtered {
+			out = append(out, it.base.candidate.RelPath)
+		}
+		return out
+	}
+
+	want := []string{"before", "top", "group/repo", "here"}
+	if got := order(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("empty query: got %v, want %v", got, want)
+	}
+
+	m.width, m.height, m.ready = 80, 12, true
+	if out := m.View().Content; !strings.Contains(out, "current") {
+		t.Error("current row should be labelled")
+	}
+
+	m.tiQuery.SetValue("e")
+	m.rebuildFiltered()
+	if got := order(); got[0] != "here" {
+		t.Errorf("query: got %v, want here first", got)
+	}
+}
+
+func TestCleanTmp_enterTargetsCursorRow(t *testing.T) {
+	tmpDir := t.TempDir()
+	var all []baseItem
+	for _, name := range []string{"one", "two", "three"} {
+		p := filepath.Join(tmpDir, name)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, baseItem{candidate: cand.Candidate{RelPath: name, IsTmp: true, AbsPath: p}, active: name == "two"})
+	}
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
+	var killed []string
+	m.clean.kill = func(s string) error {
+		killed = append(killed, s)
+		return nil
+	}
+	m.all = all
+	m.rebuildCleanFiltered()
+	m.clean.cursor = 1
+	m.inputMode = modeCleanTmp
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ = updated.(model).Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
+	m = updated.(model)
+
+	for name, wantGone := range map[string]bool{"one": false, "two": true, "three": false} {
+		_, err := os.Stat(filepath.Join(tmpDir, name))
+		if gone := os.IsNotExist(err); gone != wantGone {
+			t.Errorf("%s: gone = %v, want %v", name, gone, wantGone)
+		}
+	}
+	if len(killed) != 1 || killed[0] != "two" {
+		t.Errorf("killed sessions = %v, want [two]", killed)
+	}
+}
+
+func TestConfirmClean_overflow(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.clean.selected = map[string]bool{}
+	for i := range 20 {
+		p := fmt.Sprintf("/t/tmp-%02d", i)
+		m.all = append(m.all, baseItem{candidate: cand.Candidate{AbsPath: p, RelPath: filepath.Base(p), IsTmp: true}})
+		m.clean.selected[p] = true
+	}
+	m.width, m.height, m.ready = 60, 10, true // 6 body rows: header + 4 rows + count
+	m.inputMode = modeConfirmClean
+
+	out := m.View().Content
+	if !strings.Contains(out, "tmp-03") || strings.Contains(out, "tmp-04") {
+		t.Errorf("expected rows 00-03 only: %q", out)
+	}
+	if !strings.Contains(out, "… and 16 more") {
+		t.Errorf("missing overflow count: %q", out)
 	}
 }

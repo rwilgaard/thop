@@ -70,6 +70,8 @@ type tmpCreatedMsg struct {
 type baseItem struct {
 	candidate candidates.Candidate
 	active    bool
+	current   bool
+	previous  bool
 }
 
 type scoredItem struct {
@@ -101,6 +103,7 @@ type cleanFlow struct {
 	filtered []scoredItem // search-filtered view of tmp candidates
 	cursor   int
 	selected map[string]bool // AbsPath of selected tmp candidates
+	kill     func(session string) error
 }
 
 type model struct {
@@ -197,6 +200,7 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 		clean: cleanFlow{
 			tiQuery:  newTextInput("Search…"),
 			selected: make(map[string]bool),
+			kill:     ts.KillSession,
 		},
 	}
 	_ = m.tiQuery.Focus()
@@ -208,6 +212,8 @@ func makeBaseItem(c candidates.Candidate, ts tmux.State) baseItem {
 	return baseItem{
 		candidate: c,
 		active:    candidates.Active(c, ts),
+		current:   candidates.Current(c, ts),
+		previous:  candidates.Previous(c, ts),
 	}
 }
 

@@ -12,8 +12,11 @@ import (
 
 // State holds the set of active session and window names.
 type State struct {
-	Sessions map[string]bool // session name → exists
-	Windows  map[string]bool // "session/window" → exists
+	Sessions      map[string]bool // session name → exists
+	Windows       map[string]bool // "session/window" → exists
+	Current       string          // empty outside tmux
+	CurrentWindow string
+	Last          string
 }
 
 // LoadState queries tmux for all active sessions and windows.
@@ -37,7 +40,33 @@ func LoadState() State {
 			ts.Sessions[session] = true
 		}
 	}
+	if os.Getenv("TMUX") != "" {
+		if out, err := tmuxOutput("display-message", "-p", clientFormat); err == nil {
+			ts.Current, ts.CurrentWindow, ts.Last = parseClient(string(out))
+		}
+	}
 	return ts
+}
+
+const clientFormat = "#{session_name}\t#{window_name}\t#{client_last_session}"
+
+func parseClient(out string) (session, window, last string) {
+	p := strings.SplitN(strings.TrimRight(out, "\r\n"), "\t", 3)
+	if len(p) != 3 {
+		return "", "", ""
+	}
+	return p[0], p[1], p[2]
+}
+
+// KillSession kills the named session. If the client is attached to it, the
+// client is moved to another session first so it isn't detached.
+func (s State) KillSession(name string) error {
+	if name == s.Current {
+		if tmuxRun("switch-client", "-l") != nil {
+			_ = tmuxRun("switch-client", "-n")
+		}
+	}
+	return tmuxRun("kill-session", "-t", exact(name))
 }
 
 // HandleSelection creates or switches to the appropriate tmux session for the given path.

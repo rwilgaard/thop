@@ -15,8 +15,9 @@ const leftPad = " "
 // Built once in newModel — no package-level render state, so any model
 // (including test-constructed ones) renders correctly.
 type styles struct {
-	icons       config.Icons
-	activeLabel string // icons.Active + " open "
+	icons        config.Icons
+	activeLabel  string // icons.Active + " open "
+	currentLabel string
 
 	sep            lipgloss.Style
 	prompt         lipgloss.Style
@@ -38,6 +39,7 @@ func newStyles(cfg config.Config) styles {
 	c := cfg.Colors.OrDefaults()
 	st := styles{icons: cfg.Icons.OrDefaults()}
 	st.activeLabel = st.icons.Active + " open "
+	st.currentLabel = st.icons.Active + " current "
 	st.sep = lipgloss.NewStyle().Faint(true)
 	st.prompt = lipgloss.NewStyle().Foreground(lipgloss.Color(c.PromptColor)).Bold(true)
 	st.selected = lipgloss.NewStyle().Background(lipgloss.Color(c.SelectionBg)).Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)

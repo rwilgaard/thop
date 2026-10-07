@@ -91,8 +91,26 @@ func (m *model) rebuildFiltered() {
 		pool = append(pool, item)
 	}
 	m.filtered = m.filterScored(pool, m.tiQuery.Value())
+	if m.tiQuery.Value() == "" {
+		// Previous session first, current spot last: enter on a fresh picker
+		// hops back instead of switching to where you already are.
+		sort.SliceStable(m.filtered, func(i, j int) bool {
+			return sessionTier(m.filtered[i].base) < sessionTier(m.filtered[j].base)
+		})
+	}
 	if m.cursor >= len(m.filtered) {
 		m.cursor = 0
+	}
+}
+
+func sessionTier(it baseItem) int {
+	switch {
+	case it.current:
+		return 2
+	case it.previous:
+		return 0
+	default:
+		return 1
 	}
 }
 

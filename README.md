@@ -37,6 +37,8 @@ thop --version         # print version
 
 Inside tmux, `thop` opens as a popup. Outside tmux it runs inline.
 
+With an empty query the session you came from is listed first and the one you're in last, so `thop` then `Enter` hops back.
+
 ### Keys
 
 | Key | Action |
@@ -61,7 +63,7 @@ The status bar shows the active filter (`^A All · ^P Projects · ^R Repos · ^T
 
 `Ctrl-N` creates a disposable scratch directory under `tmp_path` and opens it immediately as a tmux session. Projects appear in the picker with a `~` icon.
 
-`Ctrl-X` opens a delete mode: type to filter the list, `Space` to select specific projects, `Enter` to confirm, `Esc` to cancel. With nothing selected, all tmp projects are deleted after confirmation.
+`Ctrl-X` opens a delete mode: type to filter the list, `Space` to select specific projects, `Enter` to confirm, `Esc` to cancel. With nothing selected, only the highlighted project is deleted. Open tmux sessions of deleted projects are killed.
 
 ## Configuration
 

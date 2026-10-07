@@ -36,3 +36,24 @@ func TestTargetWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestParseClient(t *testing.T) {
+	tests := []struct {
+		name, in                  string
+		session, window, lastSess string
+	}{
+		{"full", "work\tapi\thome\n", "work", "api", "home"},
+		{"no last session", "work\tapi\t\n", "work", "api", ""},
+		{"tab in window name stays in last field", "work\tapi\thome\textra", "work", "api", "home\textra"},
+		{"malformed", "work\n", "", "", ""},
+		{"empty", "", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, w, l := parseClient(tt.in)
+			if s != tt.session || w != tt.window || l != tt.lastSess {
+				t.Errorf("parseClient(%q) = %q, %q, %q; want %q, %q, %q", tt.in, s, w, l, tt.session, tt.window, tt.lastSess)
+			}
+		})
+	}
+}

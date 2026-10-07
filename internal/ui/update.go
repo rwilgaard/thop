@@ -140,14 +140,15 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Enter):
-		if len(m.filtered) > 0 {
-			c := m.filtered[m.cursor].base.candidate
-			m.result.Candidate = c
-			if m.inTmux {
-				m.loadingText = "Opening…"
-				m.inputMode = modeLoading
-				return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root), m.spin.Tick)
-			}
+		if len(m.filtered) == 0 {
+			return m, nil
+		}
+		c := m.filtered[m.cursor].base.candidate
+		m.result.Candidate = c
+		if m.inTmux {
+			m.loadingText = "Opening…"
+			m.inputMode = modeLoading
+			return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Up):

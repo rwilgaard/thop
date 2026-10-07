@@ -169,3 +169,35 @@ func TestLoadTmp_missingDir(t *testing.T) {
 		t.Errorf("expected nil for missing dir, got %v", cands)
 	}
 }
+
+func TestCurrentPrevious(t *testing.T) {
+	ts := tmux.State{Current: "group", CurrentWindow: "api", Last: "foo_bar"}
+	tests := []struct {
+		name              string
+		c                 Candidate
+		current, previous bool
+	}{
+		{"current session", Candidate{AbsPath: "/r/group", RelPath: "group"}, true, false},
+		{"current window", Candidate{AbsPath: "/r/group/api", RelPath: "group/api"}, true, false},
+		{"other window in current session", Candidate{AbsPath: "/r/group/web", RelPath: "group/web"}, false, false},
+		{"last session", Candidate{AbsPath: "/r/foo.bar", RelPath: "foo.bar"}, false, true},
+		{"window in last session", Candidate{AbsPath: "/r/foo.bar/x", RelPath: "foo.bar/x"}, false, false},
+		{"unrelated", Candidate{AbsPath: "/r/other", RelPath: "other"}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Current(tt.c, ts); got != tt.current {
+				t.Errorf("Current = %v, want %v", got, tt.current)
+			}
+			if got := Previous(tt.c, ts); got != tt.previous {
+				t.Errorf("Previous = %v, want %v", got, tt.previous)
+			}
+		})
+	}
+	t.Run("outside tmux", func(t *testing.T) {
+		c := Candidate{AbsPath: "/r/group", RelPath: "group"}
+		if Current(c, tmux.State{}) || Previous(c, tmux.State{}) {
+			t.Error("empty state should match nothing")
+		}
+	})
+}
