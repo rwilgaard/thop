@@ -45,7 +45,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inTmux {
 			m.loadingText = "Opening…"
 			m.inputMode = modeLoading
-			return m, tea.Batch(cmdRunSelection(msg.path, ""), m.spin.Tick)
+			return m, tea.Batch(cmdRunSelection(msg.path, "", m.result.Clone.Session), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case tmpCreatedMsg:
@@ -53,9 +53,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.showError(msg.err.Error(), modeNameInput), nil
 		}
 		m.result.Tmp.Path = msg.path
+		if m.sessionOf(msg.path) == "" {
+			m.addCandidates(candidates.Candidate{AbsPath: msg.path, Root: m.tmpPath, RelPath: m.result.Tmp.Name, IsTmp: true})
+		}
+		m.result.Tmp.Session = m.sessionOf(msg.path)
 		if m.inTmux {
 			m.loadingText = "Opening…"
-			return m, tea.Batch(cmdRunSelection(msg.path, m.tmpPath), m.spin.Tick)
+			return m, tea.Batch(cmdRunSelection(msg.path, m.tmpPath, m.result.Tmp.Session), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case tea.KeyPressMsg:
@@ -80,6 +84,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelp(msg)
 		case modeSetup:
 			return m.updateSetup(msg)
+		case modeNewProjRoot:
+			return m.updateNewProjRoot(msg)
+		case modeNewProjName:
+			return m.updateNewProjName(msg)
 		case modeLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -132,6 +140,19 @@ func (m model) forwardInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clean.cursor = 0
 			m.rebuildCleanFiltered()
 		}
+	case modeNewProjRoot:
+		prev := m.newProj.tiRoot.Value()
+		m.newProj.tiRoot, cmd = m.newProj.tiRoot.Update(msg)
+		if m.newProj.tiRoot.Value() != prev {
+			m.newProj.cursor = 0
+			m.rebuildNewProjFiltered()
+		}
+	case modeNewProjName:
+		prev := m.newProj.tiName.Value()
+		m.newProj.tiName, cmd = m.newProj.tiName.Update(msg)
+		if m.newProj.tiName.Value() != prev {
+			m.newProj.err = ""
+		}
 	case modeSetup:
 		prev := m.setup.tiPath.Value()
 		m.setup.tiPath, cmd = m.setup.tiPath.Update(msg)
@@ -175,7 +196,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.inTmux {
 			m.loadingText = "Opening…"
 			m.inputMode = modeLoading
-			return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root), m.spin.Tick)
+			return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root, c.Session), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Up):
@@ -201,6 +222,8 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.inputMode = modeURLInput
 		m.clone.tiURL.SetValue("")
 		return m, m.clone.tiURL.Focus()
+	case key.Matches(msg, m.keys.NewProject):
+		return m, m.openNewProject()
 	case key.Matches(msg, m.keys.NewTmp):
 		m.tiQuery.Blur()
 		m.tmp.tiName.SetValue("")
@@ -277,6 +300,8 @@ func (m model) updateError(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.clone.tiURL.Focus()
 	case modeNameInput:
 		return m, m.tmp.tiName.Focus()
+	case modeNewProjName:
+		return m, m.newProj.tiName.Focus()
 	default:
 		return m, m.tiQuery.Focus()
 	}

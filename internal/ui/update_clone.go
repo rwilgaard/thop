@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/git"
 )
 
@@ -62,7 +63,9 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.clone.tiURL.Focus()
 	case key.Matches(msg, m.keys.Enter):
 		if m.clone.destCursor < len(m.clone.destFiltered) {
-			chosen := m.clone.destFiltered[m.clone.destCursor].base.candidate.AbsPath
+			dest := m.clone.destFiltered[m.clone.destCursor].base.candidate
+			chosen := dest.AbsPath
+			m.clone.destSession, _ = candidates.Target(dest)
 			name := git.RepoNameFromURL(m.clone.tiURL.Value())
 			fullDest := filepath.Join(chosen, name)
 			if _, err := os.Stat(fullDest); err == nil {
@@ -113,7 +116,7 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // startClone records the clone request and kicks off the git clone with a
 // loading spinner.
 func (m model) startClone(dest string) (tea.Model, tea.Cmd) {
-	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest}
+	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest, Session: m.clone.destSession}
 	m.clone.tiDest.Blur()
 	m.clone.tiName.Blur()
 	m.inputMode = modeCloning

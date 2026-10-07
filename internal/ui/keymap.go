@@ -30,6 +30,7 @@ type keyMap struct {
 	NextFilter key.Binding
 	PrevFilter key.Binding
 	Open       key.Binding
+	NewProject key.Binding
 }
 
 // byName maps config keymap names to their bindings. Every keyMap field must
@@ -42,6 +43,7 @@ func (km *keyMap) byName() map[string]*key.Binding {
 		"repos": &km.Repos, "tmp": &km.Tmp, "open": &km.Open,
 		"close": &km.Close, "pageup": &km.PageUp, "pagedown": &km.PageDown,
 		"nextfilter": &km.NextFilter, "prevfilter": &km.PrevFilter,
+		"newproject": &km.NewProject,
 	}
 }
 
@@ -51,8 +53,8 @@ func (km *keyMap) byName() map[string]*key.Binding {
 // truthful after a remap.
 func buildKeyMap(cfg config.Config) keyMap {
 	km := keyMap{
-		Up:       key.NewBinding(key.WithKeys("up", "ctrl+k", "ctrl+p"), key.WithHelp("↑/ctrl-k/ctrl-p", "Move up")),
-		Down:     key.NewBinding(key.WithKeys("down", "ctrl+j", "ctrl+n"), key.WithHelp("↓/ctrl-j/ctrl-n", "Move down")),
+		Up:       key.NewBinding(key.WithKeys("up", "ctrl+k"), key.WithHelp("↑/ctrl-k", "Move up")),
+		Down:     key.NewBinding(key.WithKeys("down", "ctrl+j"), key.WithHelp("↓/ctrl-j", "Move down")),
 		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "Open selected")),
 		Quit:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "Quit")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "Toggle help")),
@@ -69,6 +71,7 @@ func buildKeyMap(cfg config.Config) keyMap {
 		Close:      key.NewBinding(key.WithKeys("ctrl+q"), key.WithHelp("ctrl-q", "Close session")),
 		PageUp:     key.NewBinding(key.WithKeys("pgup", "ctrl+u"), key.WithHelp("pgup/ctrl-u", "Page up")),
 		PageDown:   key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn/ctrl-d", "Page down")),
+		NewProject: key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl-n", "New project")),
 		NextFilter: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "Next filter")),
 		PrevFilter: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift-tab", "Previous filter")),
 	}
@@ -171,7 +174,7 @@ func buildHelpGroups(km keyMap) []helpGroup {
 	}
 	return []helpGroup{
 		{"Navigate", []key.Binding{km.Up, km.Down, km.PageUp, km.PageDown, km.Enter, km.Quit}},
-		{"Actions", []key.Binding{km.Clone, km.NewTmp, km.CleanTmp, km.Close, km.Help}},
+		{"Actions", []key.Binding{km.Clone, km.NewProject, km.NewTmp, km.CleanTmp, km.Close, km.Help}},
 		{"Filters", filters},
 	}
 }

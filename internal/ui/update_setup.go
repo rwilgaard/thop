@@ -6,7 +6,7 @@ import (
 )
 
 func (m *model) openSetup(s Setup) tea.Cmd {
-	m.setup = setupFlow{tiPath: newTextInput("~/projects"), file: s.File, add: s.Add}
+	m.setup = setupFlow{tiPath: newTextInput("~/projects"), add: s.Add}
 	m.sizeDialogInputs()
 	m.tiQuery.Blur()
 	m.inputMode = modeSetup
@@ -36,17 +36,13 @@ func (m model) updateSetup(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if path == "" {
 			return m, nil
 		}
-		cs, err := m.setup.add(path)
+		root, cs, err := m.setup.add(path)
 		if err != nil {
 			m.setup.err = err.Error()
 			return m, nil
 		}
-		roots := make([]baseItem, 0, len(cs)+len(m.all))
-		for _, c := range cs {
-			roots = append(roots, makeBaseItem(c, m.ts))
-		}
-		m.all = append(roots, m.all...)
-		m.setup.file = ""
+		m.addCandidates(cs...)
+		m.paths = append(m.paths, root)
 		return m, m.closeSetup()
 	default:
 		return m.forwardInput(msg)

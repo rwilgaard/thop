@@ -42,6 +42,7 @@ type Icons struct {
 }
 
 type Config struct {
+	File    string   `yaml:"-"` // where the config was loaded from
 	Paths   []string `yaml:"paths"`
 	TmpPath string   `yaml:"tmp_path"`
 	Layout  string   `yaml:"layout"`
@@ -118,13 +119,14 @@ paths:
 # Binding a plain character (like "k") makes it untypeable in the search
 # field. Binding the same key to two actions is rejected at startup.
 # keymap:
-#   up: ["up", "ctrl+k", "ctrl+p"]
-#   down: ["down", "ctrl+j", "ctrl+n"]
+#   up: ["up", "ctrl+k"]
+#   down: ["down", "ctrl+j"]
 #   enter: ["enter"]
 #   quit: ["esc", "ctrl+c"]
 #   help: ["?"]
 #   clone: ["ctrl+g"]
 #   newtmp: ["ctrl+t"]
+#   newproject: ["ctrl+n"]
 #   cleantmp: ["ctrl+x"]
 #   close: ["ctrl+q"]
 #   pageup: ["pgup", "ctrl+u"]
@@ -201,6 +203,7 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	tmpDefault := filepath.Join(xdgCache, "thop", "tmp")
 	cfg := defaultConfig()
 	path := File(xdgConfig)
+	cfg.File = path
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		_ = os.MkdirAll(filepath.Dir(path), 0o755)
@@ -214,6 +217,7 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		cfg = defaultConfig()
+		cfg.File = path
 		cfg.TmpPath = tmpDefault
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}

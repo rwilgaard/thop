@@ -3,6 +3,7 @@ package candidates
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -198,6 +199,84 @@ func TestCurrentPrevious(t *testing.T) {
 		c := Candidate{AbsPath: "/r/group", RelPath: "group"}
 		if Current(c, tmux.State{}) || Previous(c, tmux.State{}) {
 			t.Error("empty state should match nothing")
+		}
+	})
+}
+
+func TestValidName(t *testing.T) {
+	tests := []struct {
+		in        string
+		name, tmp bool
+	}{
+		{"app", true, true},
+		{"my.app-2", true, true},
+		{"", false, true},
+		{"a/b", false, false},
+		{"..", false, false},
+		{"a..b", false, false},
+	}
+	for _, tt := range tests {
+		if got := ValidName(tt.in); got != tt.name {
+			t.Errorf("ValidName(%q) = %v, want %v", tt.in, got, tt.name)
+		}
+		if got := ValidTmpName(tt.in); got != tt.tmp {
+			t.Errorf("ValidTmpName(%q) = %v, want %v", tt.in, got, tt.tmp)
+		}
+	}
+}
+
+func TestResolve(t *testing.T) {
+	cs := Resolve([]Candidate{
+		{AbsPath: "/code/alpha", Root: "/code", RelPath: "alpha"},
+		{AbsPath: "/work/alpha", Root: "/work", RelPath: "alpha"},
+		{AbsPath: "/work/alpha/api", Root: "/work", RelPath: "alpha/api", IsRepo: true},
+		{AbsPath: "/code/beta", Root: "/code", RelPath: "beta"},
+		{AbsPath: "/code/beta/api", Root: "/code", RelPath: "beta/api", IsRepo: true},
+		{AbsPath: "/code/foo.bar", Root: "/code", RelPath: "foo.bar"},
+		{AbsPath: "/work/foo_bar", Root: "/work", RelPath: "foo_bar"},
+		{AbsPath: "/cache/tmp/scratch", Root: "/cache/tmp", RelPath: "scratch", IsTmp: true},
+		{AbsPath: "/code/scratch", Root: "/code", RelPath: "scratch"},
+	})
+	want := []struct {
+		path, session string
+		collides      bool
+	}{
+		{"/code/alpha", "alpha@code", true},
+		{"/work/alpha", "alpha@work", true},
+		{"/work/alpha/api", "alpha@work", true}, // parent is ambiguous, so the repo row is too
+		{"/code/beta", "beta", false},
+		{"/code/beta/api", "beta", false},
+		{"/code/foo.bar", "foo_bar@code", false}, // same session name, different label
+		{"/work/foo_bar", "foo_bar@work", false},
+		{"/cache/tmp/scratch", "scratch@tmp", true},
+		{"/code/scratch", "scratch@code", true},
+	}
+	for i, w := range want {
+		c := cs[i]
+		if c.AbsPath != w.path || c.Session != w.session || c.Collides != w.collides {
+			t.Errorf("%s: session = %q collides = %v, want %q %v", c.AbsPath, c.Session, c.Collides, w.session, w.collides)
+		}
+	}
+
+	t.Run("target and active use the resolved session", func(t *testing.T) {
+		ts := tmux.State{
+			Sessions: map[string]bool{"alpha@work": true},
+			Windows:  map[string]bool{"alpha@work/api": true},
+		}
+		for _, c := range cs[:3] {
+			if got, want := Active(c, ts), c.Root == "/work"; got != want {
+				t.Errorf("Active(%s) = %v, want %v", c.AbsPath, got, want)
+			}
+		}
+		if s, w := Target(cs[2]); s != "alpha@work" || w != "api" {
+			t.Errorf("Target = %q/%q, want alpha@work/api", s, w)
+		}
+	})
+
+	t.Run("idempotent", func(t *testing.T) {
+		again := Resolve(slices.Clone(cs))
+		if !slices.Equal(again, cs) {
+			t.Errorf("second Resolve changed the result")
 		}
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -39,6 +40,8 @@ const (
 	modeCloning // git clone running; esc cancels
 	modeHelp
 	modeSetup // first run: no scan roots configured
+	modeNewProjRoot
+	modeNewProjName
 	modeError
 )
 
@@ -49,14 +52,16 @@ type Result struct {
 }
 
 type CloneRequest struct {
-	URL    string
-	Dest   string // target path chosen before clone
-	Cloned string // actual cloned path, set after clone succeeds
+	URL     string
+	Dest    string // target path chosen before clone
+	Cloned  string // actual cloned path, set after clone succeeds
+	Session string // session of the directory cloned into
 }
 
 type TmpRequest struct {
-	Name string
-	Path string // actual created path, set after mkdir succeeds
+	Name    string
+	Path    string // actual created path, set after mkdir succeeds
+	Session string
 }
 
 type (
@@ -94,6 +99,7 @@ type cloneFlow struct {
 	destFiltered []scoredItem
 	destCursor   int
 	destDir      string // chosen parent dir (set when conflict detected)
+	destSession  string
 	shorthand    string
 	cancel       context.CancelFunc // non-nil while a clone is running
 	cancelled    bool
@@ -115,17 +121,27 @@ type cleanFlow struct {
 
 // Setup enables the first-run dialog shown when no scan roots are configured.
 type Setup struct {
-	File string // config file, as shown to the user
-	// Add saves path as a scan root and returns its candidates.
-	Add func(path string) ([]candidates.Candidate, error)
+	// Add saves path as a scan root and returns the resolved root with its
+	// candidates.
+	Add func(path string) (root string, cs []candidates.Candidate, err error)
 }
 
 // setupFlow holds first-run state.
 type setupFlow struct {
 	tiPath textinput.Model
-	file   string
-	add    func(path string) ([]candidates.Candidate, error)
+	add    func(path string) (string, []candidates.Candidate, error)
 	err    string
+}
+
+// newProjFlow holds Ctrl-N new-project state.
+type newProjFlow struct {
+	tiRoot   textinput.Model
+	filtered []scoredItem // scan roots matching tiRoot
+	cursor   int
+	picked   bool // root came from the picker, so esc returns there
+	root     string
+	tiName   textinput.Model
+	err      string
 }
 
 type model struct {
@@ -145,6 +161,11 @@ type model struct {
 	tmp   tmpFlow
 	clean cleanFlow
 	setup setupFlow
+
+	newProj    newProjFlow
+	paths      []string // scan roots
+	missing    []string // scan roots not found on disk
+	configFile string   // as shown to the user
 
 	closeTarget baseItem
 	ts          tmux.State
@@ -176,10 +197,35 @@ func newTextInput(placeholder string) textinput.Model {
 	return ti
 }
 
-func cmdRunSelection(path, root string) tea.Cmd {
+func cmdRunSelection(path, root, session string) tea.Cmd {
 	return func() tea.Msg {
-		return selectionDoneMsg{tmux.HandleSelection(path, root)}
+		return selectionDoneMsg{tmux.HandleSelection(path, root, session)}
 	}
+}
+
+// addCandidates adds cs to the picker and re-resolves sessions, since a new
+// name can collide with an existing one.
+func (m *model) addCandidates(cs ...candidates.Candidate) {
+	all := make([]candidates.Candidate, 0, len(m.all)+len(cs))
+	all = append(all, cs...)
+	for _, it := range m.all {
+		all = append(all, it.candidate)
+	}
+	m.all = m.all[:0]
+	for _, c := range candidates.Resolve(all) {
+		m.all = append(m.all, makeBaseItem(c, m.ts))
+	}
+}
+
+// sessionOf returns the resolved session of the candidate at path.
+func (m model) sessionOf(path string) string {
+	for _, it := range m.all {
+		if it.candidate.AbsPath == path {
+			session, _ := candidates.Target(it.candidate)
+			return session
+		}
+	}
+	return ""
 }
 
 func cmdClone(ctx context.Context, url, dest string) tea.Cmd {
@@ -212,6 +258,8 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 		killWindow:   tmux.KillWindow,
 		loadState:    tmux.LoadState,
 		tmpPath:      cfg.TmpPath,
+		paths:        cfg.Paths,
+		configFile:   tilde(cfg.File),
 		layoutBottom: cfg.Layout == "bottom",
 		keys:         buildKeyMap(cfg),
 		st:           newStyles(cfg),
@@ -229,10 +277,19 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 		tmp: tmpFlow{
 			tiName: newTextInput("Name (empty = auto)"),
 		},
+		newProj: newProjFlow{
+			tiRoot: newTextInput("Search roots…"),
+			tiName: newTextInput("Name"),
+		},
 		clean: cleanFlow{
 			tiQuery:  newTextInput("Search…"),
 			selected: make(map[string]bool),
 		},
+	}
+	for _, p := range cfg.Paths {
+		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+			m.missing = append(m.missing, p)
+		}
 	}
 	if switchOnly {
 		m.view = viewOpen
@@ -289,7 +346,23 @@ func (m model) maxRows() int {
 	if height == 0 {
 		height = 24
 	}
-	return max(5, height-4)
+	rows := max(5, height-4)
+	if len(m.missing) > 0 {
+		rows-- // warning row
+	}
+	return rows
+}
+
+// tilde shortens a path under the home dir to "~/…" for display.
+func tilde(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+		return "~/" + rest
+	}
+	return path
 }
 
 func (m model) pageStep(dir int) int {

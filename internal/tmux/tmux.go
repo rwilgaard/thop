@@ -72,7 +72,8 @@ func (s State) KillSession(name string) error {
 // HandleSelection creates or switches to the appropriate tmux session for the given path.
 // root is the Candidate.Root for the selected path: a direct child of root gets a flat
 // session (no window), a nested path gets a window within its parent's session.
-func HandleSelection(selected, root string) error {
+// session names the tmux session; empty means the project directory's name.
+func HandleSelection(selected, root, session string) error {
 	var projectDir string
 	var isRepo bool
 
@@ -84,7 +85,10 @@ func HandleSelection(selected, root string) error {
 		isRepo = true
 	}
 
-	sessionName := Sessionize(filepath.Base(projectDir))
+	sessionName := session
+	if sessionName == "" {
+		sessionName = Sessionize(filepath.Base(projectDir))
+	}
 
 	if !hasSession(sessionName) {
 		// Create session with projectDir as root so user-created windows inherit it.

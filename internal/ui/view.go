@@ -50,9 +50,22 @@ func emptyMsg(query string, pool int) string {
 	return "No matches"
 }
 
+func (m model) missingLine(width int) string {
+	names := make([]string, len(m.missing))
+	for i, p := range m.missing {
+		names[i] = tilde(p)
+	}
+	msg := m.st.icons.Warning + " Not found: " + strings.Join(names, ", ")
+	if m.configFile != "" {
+		msg += " — check " + m.configFile
+	}
+	msg, _ = truncateName(msg, nil, width-2)
+	return leftPad + m.st.dimActive.Render(msg)
+}
+
 func (m model) emptyMsg() string {
-	if m.setup.file != "" && m.tiQuery.Value() == "" && m.view == viewAll {
-		return "No project roots. Add paths in " + m.setup.file
+	if len(m.paths) == 0 && m.configFile != "" && m.tiQuery.Value() == "" && m.view == viewAll {
+		return "No project roots. Add paths in " + m.configFile
 	}
 	return emptyMsg(m.tiQuery.Value(), len(m.all))
 }
@@ -201,9 +214,20 @@ func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 		rightW = lipgloss.Width(label)
 	}
 	fixedW := 1 + lipgloss.Width(glyph) + 1
-	text, matches := truncateName(c.RelPath, row.matches, o.width-1-fixedW-1-rightW)
+	nameW := o.width - 1 - fixedW - 1 - rightW
+	text, matches := truncateName(c.RelPath, row.matches, nameW)
 	name := renderName(text, matches, nameStyle, matchStyle)
 	contentW := fixedW + lipgloss.Width(text)
+	// rows that look alike say which root they are in, space permitting
+	if room := nameW - lipgloss.Width(text) - 2; c.Collides && room >= 4 {
+		root, _ := truncateName(tilde(c.Root), nil, room)
+		rootStyle := st.sep
+		if isCursor {
+			rootStyle = st.selected.Bold(false).Faint(true)
+		}
+		name += sp + sp + rootStyle.Render(root)
+		contentW += 2 + lipgloss.Width(root)
+	}
 	pad := max(1, o.width-1-contentW-rightW)
 	padStr := strings.Repeat(" ", pad)
 	if isCursor {
@@ -269,6 +293,9 @@ func (m model) searchLine(width int) string {
 	case modeDestPicker:
 		return m.st.inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(),
 			[][2]string{{"enter", "Select"}, {"esc", "Back"}}, width)
+	case modeNewProjRoot:
+		return m.st.inputRow(m.st.prompt.Render("New project › Root "+prompt+" "), m.newProj.tiRoot.View(),
+			[][2]string{{"enter", "Select"}, {"esc", "Back"}}, width)
 	default:
 		hints := [][2]string{
 			{m.keys.Enter.Help().Key, "Open"},
@@ -292,6 +319,12 @@ func (m model) bodyLines(width, maxRows int) []string {
 			cursor: m.clean.cursor, maxRows: maxRows, width: width,
 			selected: m.clean.selected, showActive: true,
 			emptyMsg: emptyMsg(m.clean.tiQuery.Value(), len(m.tmpItems())),
+			reversed: m.layoutBottom,
+		})
+	case modeNewProjRoot:
+		return m.st.renderRows(toListRows(m.newProj.filtered), listOpts{
+			cursor: m.newProj.cursor, maxRows: maxRows, width: width,
+			emptyMsg: "No matches",
 			reversed: m.layoutBottom,
 		})
 	case modeDestPicker:
@@ -318,10 +351,11 @@ func (m model) View() tea.View {
 	if width == 0 {
 		width = 80
 	}
-	maxRows := m.maxRows()
-	frame := m.frame(width, maxRows)
-	if d, ok := m.dialog(width, maxRows-1); ok {
-		frame = overlay(frame, m.st.renderDialog(d), width, maxRows+4)
+	frame := m.frame(width, m.maxRows())
+	height := lipgloss.Height(frame)
+	// dialog chrome: two borders, a blank line and up to two hint rows
+	if d, ok := m.dialog(width, height-5); ok {
+		frame = overlay(frame, m.st.renderDialog(d), width, height)
 	}
 	return tea.NewView(frame)
 }
@@ -333,6 +367,9 @@ func (m model) frame(width, maxRows int) string {
 	bg.inputMode = m.backdropMode()
 	search := clampWidth(bg.searchLine(width), width)
 	body := fillRows(bg.bodyLines(width, maxRows), maxRows, m.layoutBottom)
+	if len(m.missing) > 0 {
+		body = append(body, m.missingLine(width))
+	}
 	if bg.inputMode != m.inputMode {
 		search = m.st.dim(search)
 		for i, l := range body {
@@ -428,6 +465,11 @@ func (m model) statusBar(width int) string {
 		left = m.st.modePill("Close")
 	case modeSetup:
 		left = m.st.modePill("Setup")
+	case modeNewProjRoot:
+		left = m.st.modePill("New project")
+		right = m.st.sep.Render(position(m.newProj.cursor, len(m.newProj.filtered)))
+	case modeNewProjName:
+		left = m.st.modePill("New project")
 	case modeNameInput:
 		left = m.st.modePill("New tmp")
 	case modeLoading:

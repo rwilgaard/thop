@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
-	"github.com/rwilgaard/thop/internal/tmux"
 )
 
 func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -142,7 +141,8 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 			}
 			if item.active {
 				killed = true
-				if err := m.killSession(m.ts, tmux.Sessionize(c.RelPath)); err != nil {
+				session, _ := candidates.Target(c)
+				if err := m.killSession(m.ts, session); err != nil {
 					errMsgs = append(errMsgs, "kill session "+c.RelPath+": "+err.Error())
 				}
 			}

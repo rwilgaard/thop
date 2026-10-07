@@ -43,6 +43,11 @@ func (m model) backdropMode() inputMode {
 		return modeNormal
 	case modeCloning:
 		return modeDestPicker
+	case modeNewProjName:
+		if m.newProj.picked {
+			return modeNewProjRoot
+		}
+		return modeNormal
 	default:
 		return mode
 	}
@@ -85,6 +90,16 @@ func (m model) dialogContent(frameW, maxLines int) (dialog, bool) {
 			title: "Add a project root",
 			lines: lines,
 			hints: [][2]string{{"enter", "Save"}, {"esc", "Skip"}},
+		}, true
+	case modeNewProjName:
+		lines := []string{m.st.sep.Render("in " + tilde(m.newProj.root)), input(m.newProj.tiName)}
+		if m.newProj.err != "" {
+			lines = append(lines, m.st.sep.Render(m.newProj.err))
+		}
+		return dialog{
+			title: "New project",
+			lines: lines,
+			hints: [][2]string{{"enter", "Create"}, {"esc", "Back"}},
 		}, true
 	case modeNameInput:
 		lines := []string{input(m.tmp.tiName)}
@@ -255,7 +270,7 @@ func (st styles) dim(line string) string {
 // horizontally past that.
 func (m *model) sizeDialogInputs() {
 	w := max(1, dialogWidth(m.width)-4-lipgloss.Width(m.st.icons.Prompt)-2)
-	for _, ti := range []*textinput.Model{&m.clone.tiURL, &m.clone.tiName, &m.tmp.tiName, &m.setup.tiPath} {
+	for _, ti := range []*textinput.Model{&m.clone.tiURL, &m.clone.tiName, &m.tmp.tiName, &m.setup.tiPath, &m.newProj.tiName} {
 		ti.SetWidth(w)
 		ti.SetCursor(ti.Position()) // recompute the visible window for the new width
 	}

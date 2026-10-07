@@ -45,14 +45,15 @@ With an empty query the session you came from is listed first and the one you're
 | Key | Action |
 |-----|--------|
 | Type | Filter |
-| `↑` / `Ctrl-K` / `Ctrl-P` | Move up (wraps) |
-| `↓` / `Ctrl-J` / `Ctrl-N` | Move down (wraps) |
+| `↑` / `Ctrl-K` | Move up (wraps) |
+| `↓` / `Ctrl-J` | Move down (wraps) |
 | `PgUp` / `Ctrl-U` | Page up |
 | `PgDn` / `Ctrl-D` | Page down |
 | `Enter` | Open |
 | `Tab` / `Shift-Tab` | Next / previous filter |
 | `Ctrl-Q` | Close the highlighted session or window |
 | `Ctrl-G` | Clone a git repo (`Esc` cancels a running clone) |
+| `Ctrl-N` | New project |
 | `Ctrl-T` | New tmp project |
 | `Ctrl-X` | Delete tmp projects |
 | `?` | Toggle full keymap |
@@ -61,6 +62,10 @@ With an empty query the session you came from is listed first and the one you're
 The status bar shows the filters (`All • Projects • Repos • Tmp • Open`) with the active one highlighted, and the cursor position (`3/120`). It switches to mode-specific text during clone/tmp/clean flows.
 
 `Ctrl-Q` asks before closing. On a project it kills the whole session, on a repo just its window.
+
+### New projects
+
+`Ctrl-N` creates a directory under one of your project roots and puts the cursor on it. With several roots you pick one first. Nothing is opened and no `git init` is run.
 
 ### Tmp projects
 
@@ -104,13 +109,14 @@ Every keybinding can be remapped. Omit any entry to keep its default:
 
 ```yaml
 # keymap:
-#   up: ["up", "ctrl+k", "ctrl+p"]
-#   down: ["down", "ctrl+j", "ctrl+n"]
+#   up: ["up", "ctrl+k"]
+#   down: ["down", "ctrl+j"]
 #   enter: ["enter"]
 #   quit: ["esc", "ctrl+c"]
 #   help: ["?"]
 #   clone: ["ctrl+g"]
 #   newtmp: ["ctrl+t"]
+#   newproject: ["ctrl+n"]
 #   cleantmp: ["ctrl+x"]
 #   close: ["ctrl+q"]
 #   pageup: ["pgup", "ctrl+u"]
@@ -154,7 +160,9 @@ Terminals send `ctrl+i`, `ctrl+m` and `ctrl+[` as `tab`, `enter` and `esc`, so t
 
 **Sessions and windows** — Projects open as sessions. Git repos inside a project open as windows in that session, with the session root set to the project directory so new windows land there by default.
 
-**Scanning** — Each configured path is scanned two levels deep. Directories with `.git` are treated as repos.
+**Same name in two roots** — If `~/code/app` and `~/work/app` both exist, the picker shows each with its root and the sessions are named `app@code` and `app@work`. Unique names keep a plain session name.
+
+**Scanning** — Each configured path is scanned two levels deep. Directories with `.git` are treated as repos. A configured path that doesn't exist is named in a warning row at the bottom of the list.
 
 **Frecency** — Selections are tracked and ranked with a 60/40 blend of fuzzy match score and frecency, so frequently visited paths surface quickly even with short queries.
 
