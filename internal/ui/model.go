@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -99,7 +100,6 @@ type cloneFlow struct {
 	destFiltered []scoredItem
 	destCursor   int
 	destDir      string // chosen parent dir (set when conflict detected)
-	destSession  string
 	shorthand    string
 	cancel       context.CancelFunc // non-nil while a clone is running
 	cancelled    bool
@@ -119,17 +119,14 @@ type cleanFlow struct {
 	selected map[string]bool // AbsPath of selected tmp candidates
 }
 
-// Setup enables the first-run dialog shown when no scan roots are configured.
-type Setup struct {
-	// Add saves path as a scan root and returns the resolved root with its
-	// candidates.
-	Add func(path string) (root string, cs []candidates.Candidate, err error)
-}
+// AddRoot saves path as a scan root and returns the resolved root with its
+// candidates. Passing one to Run enables the first-run dialog.
+type AddRoot func(path string) (root string, cs []candidates.Candidate, err error)
 
 // setupFlow holds first-run state.
 type setupFlow struct {
 	tiPath textinput.Model
-	add    func(path string) (string, []candidates.Candidate, error)
+	add    AddRoot // nil: roots were configured, no setup
 	err    string
 }
 
@@ -203,11 +200,15 @@ func cmdRunSelection(path, root, session string) tea.Cmd {
 	}
 }
 
-// addCandidates adds cs to the picker and re-resolves sessions, since a new
-// name can collide with an existing one.
+// addCandidates adds cs to the picker, skipping paths already listed, and
+// re-resolves sessions, since a new name can collide with an existing one.
 func (m *model) addCandidates(cs ...candidates.Candidate) {
 	all := make([]candidates.Candidate, 0, len(m.all)+len(cs))
-	all = append(all, cs...)
+	for _, c := range cs {
+		if m.sessionOf(c.AbsPath) == "" {
+			all = append(all, c)
+		}
+	}
 	for _, it := range m.all {
 		all = append(all, it.candidate)
 	}
@@ -281,16 +282,13 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 			tiRoot: newTextInput("Search roots…"),
 			tiName: newTextInput("Name"),
 		},
+		setup: setupFlow{tiPath: newTextInput("~/projects")},
 		clean: cleanFlow{
 			tiQuery:  newTextInput("Search…"),
 			selected: make(map[string]bool),
 		},
 	}
-	for _, p := range cfg.Paths {
-		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
-			m.missing = append(m.missing, p)
-		}
-	}
+	m.missing = candidates.MissingRoots(cfg.Paths)
 	if switchOnly {
 		m.view = viewOpen
 	}
@@ -355,15 +353,19 @@ func (m model) maxRows() int {
 
 // tilde shortens a path under the home dir to "~/…" for display.
 func tilde(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+	if rest, ok := strings.CutPrefix(path, homePrefix()); ok && homePrefix() != "" {
 		return "~/" + rest
 	}
 	return path
 }
+
+var homePrefix = sync.OnceValue(func() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home + string(filepath.Separator)
+})
 
 func (m model) pageStep(dir int) int {
 	return m.visualStep(dir) * m.maxRows()
@@ -396,23 +398,25 @@ func runProgram(m model) (Result, error) {
 	return Result{}, nil
 }
 
-// Run shows the picker. A non-nil setup opens the first-run dialog first.
-func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool, setup *Setup) (Result, error) {
+// Run shows the picker. A non-nil addRoot opens the first-run dialog first.
+func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool, addRoot AddRoot) (Result, error) {
 	m := newModel(cs, scores, ts, switchOnly, cfg, inTmux)
-	if setup != nil {
-		_ = m.openSetup(*setup)
+	m.setup.add = addRoot
+	if addRoot != nil {
+		_ = m.openSetup()
 	}
 	return runProgram(m)
 }
 
 // RunDestPicker shows the clone destination picker for cloneURL. A non-nil
-// setup opens the first-run dialog first.
-func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string, setup *Setup) (Result, error) {
+// addRoot opens the first-run dialog first.
+func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string, addRoot AddRoot) (Result, error) {
 	m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, inTmux)
 	m.tiQuery.Blur()
 	m.clone.tiURL.SetValue(cloneURL)
-	if setup != nil {
-		_ = m.openSetup(*setup)
+	m.setup.add = addRoot
+	if addRoot != nil {
+		_ = m.openSetup()
 	} else {
 		_ = m.openDestPicker()
 	}

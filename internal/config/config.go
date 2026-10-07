@@ -163,10 +163,11 @@ paths:
 #   separator: "-" # horizontal rule rune
 `
 
-// File returns the config file path under xdgConfig.
-func File(xdgConfig string) string {
+func configFile(xdgConfig string) string {
 	return filepath.Join(xdgConfig, "thop", "config.yaml")
 }
+
+var pathsKeyRe = regexp.MustCompile(`(?m)^paths:`)
 
 var emptyPathsRe = regexp.MustCompile(`(?m)^paths:[ \t]*(\[[ \t]*\])?[ \t]*(#.*)?$`)
 
@@ -181,6 +182,9 @@ func AddPath(file, path string) error {
 	content := string(data)
 	if loc := emptyPathsRe.FindStringIndex(content); loc != nil {
 		content = content[:loc[0]] + entry + content[loc[1]:]
+	} else if pathsKeyRe.MatchString(content) {
+		// a second paths key would make the file unparseable
+		return fmt.Errorf("%s already has a paths entry", file)
 	} else {
 		if content != "" && !strings.HasSuffix(content, "\n") {
 			content += "\n"
@@ -202,7 +206,7 @@ func AddPath(file, path string) error {
 func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	tmpDefault := filepath.Join(xdgCache, "thop", "tmp")
 	cfg := defaultConfig()
-	path := File(xdgConfig)
+	path := configFile(xdgConfig)
 	cfg.File = path
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

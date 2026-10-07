@@ -1594,7 +1594,8 @@ func TestSetup(t *testing.T) {
 		t.Helper()
 		tmp := []cand.Candidate{{AbsPath: "/t/scratch", RelPath: "scratch", IsTmp: true}}
 		m := newModel(tmp, map[string]float64{}, tmux.State{}, false, config.Config{File: "/etc/thop/config.yaml"}, false)
-		_ = m.openSetup(Setup{Add: add})
+		m.setup.add = add
+		_ = m.openSetup()
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		m = updated.(model)
 		m.setup.tiPath.SetValue("~/code")
@@ -1847,7 +1848,8 @@ func TestNewProject(t *testing.T) {
 
 	t.Run("no roots configured reopens setup", func(t *testing.T) {
 		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
-		_ = m.openSetup(Setup{Add: func(string) (string, []cand.Candidate, error) { return "", nil, nil }})
+		m.setup.add = func(string) (string, []cand.Candidate, error) { return "", nil, nil }
+		_ = m.openSetup()
 		m = send(m, esc, ctrlN)
 		if m.inputMode != modeSetup {
 			t.Errorf("mode = %v, want modeSetup", m.inputMode)

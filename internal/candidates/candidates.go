@@ -39,27 +39,35 @@ func Resolve(cs []Candidate) []Candidate {
 			named[tmux.Sessionize(c.RelPath)]++
 		}
 	}
-	parents := map[string]Candidate{} // flat candidates by dir
 	for i, c := range cs {
-		cs[i].Collides = shown[c.RelPath] > 1
-		if nested(c) {
-			continue
-		}
-		name := tmux.Sessionize(c.RelPath)
+		// a nested candidate shares its parent's root, so both get the same
+		// session name, and an ambiguous parent makes the child ambiguous too
+		top, _, _ := strings.Cut(c.RelPath, "/")
+		name := tmux.Sessionize(top)
 		if named[name] > 1 {
 			name += "@" + tmux.Sessionize(filepath.Base(c.Root))
 		}
 		cs[i].Session = name
-		parents[c.AbsPath] = cs[i]
-	}
-	for i, c := range cs {
-		if nested(c) {
-			parent := parents[filepath.Dir(c.AbsPath)]
-			cs[i].Session = parent.Session
-			cs[i].Collides = c.Collides || parent.Collides
-		}
+		cs[i].Collides = shown[c.RelPath] > 1 || shown[top] > 1
 	}
 	return cs
+}
+
+// Load returns every candidate, scanned and tmp, with sessions resolved.
+func Load(roots []string, tmpPath, cacheFile string) ([]Candidate, error) {
+	static, err := LoadCandidates(roots, cacheFile)
+	return Resolve(append(static, LoadTmp(tmpPath)...)), err
+}
+
+// MissingRoots returns the roots that are not directories on disk.
+func MissingRoots(roots []string) []string {
+	var missing []string
+	for _, r := range roots {
+		if fi, err := os.Stat(r); err != nil || !fi.IsDir() {
+			missing = append(missing, r)
+		}
+	}
+	return missing
 }
 
 func nested(c Candidate) bool {
@@ -298,13 +306,17 @@ func LoadTmp(tmpPath string) []Candidate {
 		if !e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		out = append(out, Candidate{
-			AbsPath: filepath.Join(tmpPath, name),
-			Root:    tmpPath,
-			RelPath: name,
-			IsTmp:   true,
-		})
+		out = append(out, Tmp(tmpPath, e.Name()))
 	}
 	return out
+}
+
+// Tmp returns the candidate for the tmp project name under tmpPath.
+func Tmp(tmpPath, name string) Candidate {
+	return Candidate{
+		AbsPath: filepath.Join(tmpPath, name),
+		Root:    tmpPath,
+		RelPath: name,
+		IsTmp:   true,
+	}
 }

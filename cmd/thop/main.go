@@ -59,9 +59,9 @@ func main() {
 	}
 	inTmux := os.Getenv("TMUX") != ""
 
-	var setup *ui.Setup
+	var addRoot ui.AddRoot
 	if len(cfg.Paths) == 0 {
-		setup = firstRun(config.File(xdgConfig), home, cacheFile)
+		addRoot = firstRun(cfg.File, home, cacheFile)
 	}
 
 	// Only the TUI paths use the keymap, so validate there (not for direct
@@ -85,7 +85,7 @@ func main() {
 		if runInPopupIfNeeded(inTmux, *popup, cfg) {
 			return
 		}
-		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux, setup)
+		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux, addRoot)
 		return
 	case flag.Arg(0) == "tmp":
 		doTmp(cfg, flag.Arg(1), cacheFile, frecencyFile)
@@ -112,18 +112,17 @@ func main() {
 	}
 
 	var (
-		static        []candidates.Candidate
-		tmpCands      []candidates.Candidate
+		all           []candidates.Candidate
 		tmuxState     tmux.State
 		scores        map[string]float64
 		candidatesErr error
 		frecencyErr   error
 		wg            sync.WaitGroup
 	)
-	wg.Add(4)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		static, candidatesErr = candidates.LoadCandidates(cfg.Paths, cacheFile)
+		all, candidatesErr = candidates.Load(cfg.Paths, cfg.TmpPath, cacheFile)
 	}()
 	go func() {
 		defer wg.Done()
@@ -132,10 +131,6 @@ func main() {
 	go func() {
 		defer wg.Done()
 		scores, frecencyErr = frecency.Load(frecencyFile)
-	}()
-	go func() {
-		defer wg.Done()
-		tmpCands = candidates.LoadTmp(cfg.TmpPath)
 	}()
 	wg.Wait()
 
@@ -146,8 +141,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
 	}
 
-	all := candidates.Resolve(append(static, tmpCands...))
-	result, err := ui.Run(all, scores, tmuxState, *switchOnly, cfg, inTmux, setup)
+	result, err := ui.Run(all, scores, tmuxState, *switchOnly, cfg, inTmux, addRoot)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "thop:", err)
 		return
@@ -200,13 +194,12 @@ func handleOpen(path, root, session, frecencyFile string, inTmux bool) {
 	}
 }
 
-// loadAll returns every candidate, scanned and tmp, with sessions resolved.
 func loadAll(cfg config.Config, cacheFile string) []candidates.Candidate {
-	static, err := candidates.LoadCandidates(cfg.Paths, cacheFile)
+	all, err := candidates.Load(cfg.Paths, cfg.TmpPath, cacheFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", err)
 	}
-	return candidates.Resolve(append(static, candidates.LoadTmp(cfg.TmpPath)...))
+	return all
 }
 
 // sessionFor returns the session a directly-opened path belongs to: its own
@@ -222,37 +215,35 @@ func sessionFor(path string, cs []candidates.Candidate) string {
 	return ""
 }
 
-func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool, setup *ui.Setup) {
-	result, err := ui.RunDestPicker(loadAll(cfg, cacheFile), cfg, inTmux, url, setup)
+func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool, addRoot ui.AddRoot) {
+	result, err := ui.RunDestPicker(loadAll(cfg, cacheFile), cfg, inTmux, url, addRoot)
 	if err != nil {
 		fatalf("dest picker: %v", err)
 	}
 	openResult(result, cfg, frecencyFile, inTmux)
 }
 
-// firstRun builds the setup dialog shown when no scan roots are configured:
-// saving writes the root to the config file and scans it.
-func firstRun(file, home, cacheFile string) *ui.Setup {
-	return &ui.Setup{
-		Add: func(input string) (string, []candidates.Candidate, error) {
-			input = strings.TrimSpace(input)
-			dir, err := filepath.Abs(config.ExpandHome(input, home))
-			if err != nil {
-				return "", nil, err
-			}
-			if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-				return "", nil, errors.New("not a directory")
-			}
-			entry := dir
-			if strings.HasPrefix(input, "~") {
-				entry = input
-			}
-			if err := config.AddPath(file, entry); err != nil {
-				return "", nil, err
-			}
-			cs, err := candidates.LoadCandidates([]string{dir}, cacheFile)
-			return dir, cs, err
-		},
+// firstRun returns the save action of the setup dialog shown when no scan
+// roots are configured: it writes the root to the config file and scans it.
+func firstRun(file, home, cacheFile string) ui.AddRoot {
+	return func(input string) (string, []candidates.Candidate, error) {
+		input = strings.TrimSpace(input)
+		dir, err := filepath.Abs(config.ExpandHome(input, home))
+		if err != nil {
+			return "", nil, err
+		}
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			return "", nil, errors.New("not a directory")
+		}
+		entry := dir
+		if strings.HasPrefix(input, "~") {
+			entry = input
+		}
+		if err := config.AddPath(file, entry); err != nil {
+			return "", nil, err
+		}
+		cs, err := candidates.LoadCandidates([]string{dir}, cacheFile)
+		return dir, cs, err
 	}
 }
 

@@ -34,21 +34,18 @@ func (m *model) rebuildNewProjFiltered() {
 }
 
 func (m *model) openNewProject() tea.Cmd {
+	if len(m.paths) == 0 && m.setup.add != nil {
+		return m.openSetup()
+	}
 	roots := m.projectRoots()
-	switch {
-	case len(m.paths) == 0 && m.setup.add != nil:
-		m.tiQuery.Blur()
-		m.inputMode = modeSetup
-		return m.setup.tiPath.Focus()
-	case len(roots) == 0:
+	if len(roots) == 0 {
 		return nil
-	case len(roots) == 1:
-		m.tiQuery.Blur()
-		m.newProj.picked = false
-		return m.openNewProjName(roots[0].candidate.AbsPath)
 	}
 	m.tiQuery.Blur()
-	m.newProj.picked = true
+	m.newProj.picked = len(roots) > 1
+	if !m.newProj.picked {
+		return m.openNewProjName(roots[0].candidate.AbsPath)
+	}
 	m.newProj.cursor = 0
 	m.newProj.tiRoot.SetValue("")
 	m.rebuildNewProjFiltered()
@@ -65,6 +62,10 @@ func (m *model) openNewProjName(root string) tea.Cmd {
 
 func (m model) updateNewProjRoot(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	n := len(m.newProj.filtered)
+	if cur, ok := m.navCursor(msg, m.newProj.cursor, n); ok {
+		m.newProj.cursor = cur
+		return m, nil
+	}
 	switch {
 	case msg.String() == "ctrl+c":
 		return m, tea.Quit
@@ -78,18 +79,9 @@ func (m model) updateNewProjRoot(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.newProj.tiRoot.Blur()
 		return m, m.openNewProjName(m.newProj.filtered[m.newProj.cursor].base.candidate.AbsPath)
-	case key.Matches(msg, m.keys.Up):
-		m.newProj.cursor = moveCursor(m.newProj.cursor, m.visualStep(-1), n)
-	case key.Matches(msg, m.keys.Down):
-		m.newProj.cursor = moveCursor(m.newProj.cursor, m.visualStep(1), n)
-	case key.Matches(msg, m.keys.PageUp):
-		m.newProj.cursor = pageCursor(m.newProj.cursor, m.pageStep(-1), n)
-	case key.Matches(msg, m.keys.PageDown):
-		m.newProj.cursor = pageCursor(m.newProj.cursor, m.pageStep(1), n)
 	default:
 		return m.forwardInput(msg)
 	}
-	return m, nil
 }
 
 func (m model) updateNewProjName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

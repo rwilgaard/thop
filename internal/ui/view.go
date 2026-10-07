@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type listRow struct {
@@ -59,8 +60,7 @@ func (m model) missingLine(width int) string {
 	if m.configFile != "" {
 		msg += " — check " + m.configFile
 	}
-	msg, _ = truncateName(msg, nil, width-2)
-	return leftPad + m.st.dimActive.Render(msg)
+	return leftPad + m.st.dimActive.Render(ansi.Truncate(msg, width-2, "…"))
 }
 
 func (m model) emptyMsg() string {
@@ -88,8 +88,7 @@ func (st styles) renderRows(rows []listRow, o listOpts) []string {
 		if o.emptyMsg == "" {
 			return nil
 		}
-		msg, _ := truncateName(o.emptyMsg, nil, o.width-2)
-		return []string{leftPad + st.sep.Render(msg)}
+		return []string{leftPad + st.sep.Render(ansi.Truncate(o.emptyMsg, o.width-2, "…"))}
 	}
 	start, end := scrollWindow(o.cursor, o.maxRows, len(rows))
 	out := make([]string, 0, end-start)
@@ -220,7 +219,7 @@ func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 	contentW := fixedW + lipgloss.Width(text)
 	// rows that look alike say which root they are in, space permitting
 	if room := nameW - lipgloss.Width(text) - 2; c.Collides && room >= 4 {
-		root, _ := truncateName(tilde(c.Root), nil, room)
+		root := ansi.Truncate(tilde(c.Root), room, "…")
 		rootStyle := st.sep
 		if isCursor {
 			rootStyle = st.selected.Bold(false).Faint(true)

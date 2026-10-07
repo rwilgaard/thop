@@ -179,7 +179,7 @@ func (m model) dialogContent(frameW, maxLines int) (dialog, bool) {
 		if m.clone.cancelled {
 			status, hints = "Cancelling…", [][2]string{{"ctrl-c", "Quit"}}
 		}
-		url, _ := truncateName(status, nil, innerW-2)
+		url := ansi.Truncate(status, innerW-2, "…")
 		return dialog{
 			title: "Cloning",
 			lines: []string{m.spin.View() + " " + url, m.st.sep.Render("→ " + into)},
@@ -237,7 +237,7 @@ func (st styles) renderDialog(d dialog) string {
 	boxW := d.width
 	innerW := boxW - 4
 	border := st.dialogBorder.Render
-	title, _ := truncateName(d.title, nil, boxW-5)
+	title := ansi.Truncate(d.title, boxW-5, "…")
 
 	rows := append(append(d.lines, ""), st.hintLines(d.hints, innerW)...)
 	out := make([]string, 0, len(rows)+2)

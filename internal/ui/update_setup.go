@@ -5,9 +5,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func (m *model) openSetup(s Setup) tea.Cmd {
-	m.setup = setupFlow{tiPath: newTextInput("~/projects"), add: s.Add}
-	m.sizeDialogInputs()
+func (m *model) openSetup() tea.Cmd {
+	m.setup.tiPath.SetValue("")
+	m.setup.err = ""
 	m.tiQuery.Blur()
 	m.inputMode = modeSetup
 	return m.setup.tiPath.Focus()

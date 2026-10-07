@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/git"
 )
 
@@ -54,6 +53,10 @@ func (m model) updateCloning(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if cur, ok := m.navCursor(msg, m.clone.destCursor, len(m.clone.destFiltered)); ok {
+		m.clone.destCursor = cur
+		return m, nil
+	}
 	switch {
 	case msg.String() == "ctrl+c":
 		return m, tea.Quit
@@ -63,9 +66,7 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.clone.tiURL.Focus()
 	case key.Matches(msg, m.keys.Enter):
 		if m.clone.destCursor < len(m.clone.destFiltered) {
-			dest := m.clone.destFiltered[m.clone.destCursor].base.candidate
-			chosen := dest.AbsPath
-			m.clone.destSession, _ = candidates.Target(dest)
+			chosen := m.clone.destFiltered[m.clone.destCursor].base.candidate.AbsPath
 			name := git.RepoNameFromURL(m.clone.tiURL.Value())
 			fullDest := filepath.Join(chosen, name)
 			if _, err := os.Stat(fullDest); err == nil {
@@ -77,18 +78,6 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.startClone(fullDest)
 		}
-		return m, nil
-	case key.Matches(msg, m.keys.Up):
-		m.clone.destCursor = moveCursor(m.clone.destCursor, m.visualStep(-1), len(m.clone.destFiltered))
-		return m, nil
-	case key.Matches(msg, m.keys.Down):
-		m.clone.destCursor = moveCursor(m.clone.destCursor, m.visualStep(1), len(m.clone.destFiltered))
-		return m, nil
-	case key.Matches(msg, m.keys.PageUp):
-		m.clone.destCursor = pageCursor(m.clone.destCursor, m.pageStep(-1), len(m.clone.destFiltered))
-		return m, nil
-	case key.Matches(msg, m.keys.PageDown):
-		m.clone.destCursor = pageCursor(m.clone.destCursor, m.pageStep(1), len(m.clone.destFiltered))
 		return m, nil
 	default:
 		return m.forwardInput(msg)
@@ -116,7 +105,7 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // startClone records the clone request and kicks off the git clone with a
 // loading spinner.
 func (m model) startClone(dest string) (tea.Model, tea.Cmd) {
-	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest, Session: m.clone.destSession}
+	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest, Session: m.sessionOf(filepath.Dir(dest))}
 	m.clone.tiDest.Blur()
 	m.clone.tiName.Blur()
 	m.inputMode = modeCloning

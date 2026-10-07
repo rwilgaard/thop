@@ -290,7 +290,7 @@ func TestAddPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			file := File(dir)
+			file := configFile(dir)
 			if tt.content != nil {
 				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 					t.Fatal(err)
@@ -318,7 +318,7 @@ func TestAddPath(t *testing.T) {
 
 	t.Run("tilde path expands on load", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := AddPath(File(dir), "~/projects"); err != nil {
+		if err := AddPath(configFile(dir), "~/projects"); err != nil {
 			t.Fatal(err)
 		}
 		cfg, err := Load(dir, t.TempDir(), "/home/u")
@@ -329,4 +329,22 @@ func TestAddPath(t *testing.T) {
 			t.Errorf("Paths = %v, want [/home/u/projects]", cfg.Paths)
 		}
 	})
+}
+
+func TestAddPath_existingEntries(t *testing.T) {
+	dir := t.TempDir()
+	file := configFile(dir)
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := "paths: ~\n"
+	if err := os.WriteFile(file, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddPath(file, "/r/projects"); err == nil {
+		t.Error("expected an error rather than a second paths key")
+	}
+	if data, _ := os.ReadFile(file); string(data) != before {
+		t.Errorf("file changed:\n%s", data)
+	}
 }
