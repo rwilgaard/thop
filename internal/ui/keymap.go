@@ -140,7 +140,7 @@ func ValidateKeymap(cfg config.Config) error {
 		}
 	}
 	// Sorted so a collision reports the two actions deterministically.
-	seen := map[string]string{} // key string -> binding name
+	seen := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
 		for _, k := range byName[name].Keys() {
 			if prev, dup := seen[k]; dup {

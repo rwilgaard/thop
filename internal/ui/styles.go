@@ -67,7 +67,6 @@ func newStyles(cfg config.Config) styles {
 	return st
 }
 
-// iconFor returns the type glyph and its fixed per-type color for a candidate.
 func iconFor(c candidates.Candidate, ic config.Icons) (string, color.Color) {
 	switch {
 	case c.IsTmp:
@@ -79,8 +78,6 @@ func iconFor(c candidates.Candidate, ic config.Icons) (string, color.Color) {
 	}
 }
 
-// bracketKey wraps a key name in the "<key>" hint form used across the status
-// and search rows. Single source of the bracket convention (see spelledKey).
 func bracketKey(s string) string { return "<" + s + ">" }
 
 func (st styles) keyHints(pairs [][2]string) string {

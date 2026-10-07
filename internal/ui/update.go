@@ -152,7 +152,6 @@ func (m model) forwardInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateInput feeds msg to ti and reports whether its value changed.
 func updateInput(ti *textinput.Model, msg tea.Msg) (tea.Cmd, bool) {
 	prev := ti.Value()
 	var cmd tea.Cmd

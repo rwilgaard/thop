@@ -10,16 +10,14 @@ import (
 	"strings"
 )
 
-// State holds the set of active session and window names.
 type State struct {
-	Sessions      map[string]bool // session name → exists
+	Sessions      map[string]bool
 	Windows       map[string]bool // "session/window" → exists
 	Current       string          // empty outside tmux
 	CurrentWindow string
 	Last          string
 }
 
-// LoadState queries tmux for all active sessions and windows.
 func LoadState() State {
 	ts := State{
 		Sessions: map[string]bool{},
@@ -142,7 +140,6 @@ func hasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", exact(name)).Run() == nil
 }
 
-// KillWindow kills the named window in session.
 func KillWindow(session, window string) error {
 	return tmuxRun("kill-window", "-t", targetWindow(session, window))
 }
@@ -163,7 +160,6 @@ func openRepoWindow(session, repoPath string) error {
 	return nil
 }
 
-// newWindow appends a window named after path's base dir at the end of session.
 func newWindow(session, path string) error {
 	return tmuxRun("new-window", "-a", "-t", exact(session)+":{end}", "-n", filepath.Base(path), "-c", path)
 }

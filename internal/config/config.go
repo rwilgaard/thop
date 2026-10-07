@@ -264,7 +264,6 @@ func (c Colors) OrDefaults() Colors {
 	}
 }
 
-// OrDefaults returns ic with every empty glyph replaced by its built-in default.
 func (ic Icons) OrDefaults() Icons {
 	def := defaultConfig().Icons
 	return Icons{
@@ -283,7 +282,6 @@ func (ic Icons) OrDefaults() Icons {
 // the string form the Colors fields expect: lipgloss.BrightBlack -> "8".
 func ansiCode[T ~uint8](c T) string { return fmt.Sprint(uint8(c)) }
 
-// orDefault returns v, or def when v is empty.
 func orDefault(v, def string) string {
 	if v == "" {
 		return def

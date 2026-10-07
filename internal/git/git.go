@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// RepoNameFromURL returns the repository name from any git URL.
 func RepoNameFromURL(url string) string {
 	// Normalize git SSH URLs (git@host:user/repo) to slash form.
 	if i := strings.LastIndex(url, ":"); i >= 0 && !strings.HasPrefix(url, "http") {
@@ -38,7 +37,6 @@ func ExpandShorthand(input, tmpl string) string {
 	return strings.ReplaceAll(tmpl, "{repo}", strings.TrimSuffix(input, ".git"))
 }
 
-// Clone runs git clone into destPath and returns destPath.
 // Stderr is captured and returned as part of any error so callers can display it.
 // Cancelling ctx sends SIGTERM so git removes the partial clone before exiting.
 func Clone(ctx context.Context, url, destPath string) (string, error) {
