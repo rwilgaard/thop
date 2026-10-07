@@ -91,12 +91,10 @@ type scoredItem struct {
 	matches []int // matched byte offsets into RelPath
 }
 
-// cloneFlow holds Ctrl-G clone state: URL entry, destination picking, rename
-// on conflict.
 type cloneFlow struct {
 	tiURL        textinput.Model
 	tiDest       textinput.Model
-	tiName       textinput.Model // rename-on-conflict input
+	tiName       textinput.Model
 	destFiltered []scoredItem
 	destCursor   int
 	destDir      string // chosen parent dir (set when conflict detected)
@@ -105,16 +103,14 @@ type cloneFlow struct {
 	cancelled    bool
 }
 
-// tmpFlow holds Ctrl-T new-tmp-project state.
 type tmpFlow struct {
 	tiName   textinput.Model
-	conflict bool // typed name already exists
+	conflict bool
 }
 
-// cleanFlow holds Ctrl-X tmp-deletion state.
 type cleanFlow struct {
 	tiQuery  textinput.Model
-	filtered []scoredItem // search-filtered view of tmp candidates
+	filtered []scoredItem
 	cursor   int
 	selected map[string]bool // AbsPath of selected tmp candidates
 }
@@ -123,17 +119,15 @@ type cleanFlow struct {
 // candidates. Passing one to Run enables the first-run dialog.
 type AddRoot func(path string) (root string, cs []candidates.Candidate, err error)
 
-// setupFlow holds first-run state.
 type setupFlow struct {
 	tiPath textinput.Model
 	add    AddRoot // nil: roots were configured, no setup
 	err    string
 }
 
-// newProjFlow holds Ctrl-N new-project state.
 type newProjFlow struct {
 	tiRoot   textinput.Model
-	filtered []scoredItem // scan roots matching tiRoot
+	filtered []scoredItem
 	cursor   int
 	picked   bool // root came from the picker, so esc returns there
 	root     string
@@ -145,7 +139,7 @@ type model struct {
 	all       []baseItem
 	normFrec  map[string]float64
 	filtered  []scoredItem
-	tiQuery   textinput.Model // modeNormal search
+	tiQuery   textinput.Model
 	cursor    int
 	view      viewMode
 	width     int
@@ -160,7 +154,7 @@ type model struct {
 	setup setupFlow
 
 	newProj    newProjFlow
-	paths      []string // scan roots
+	paths      []string
 	missing    []string // scan roots not found on disk
 	configFile string   // as shown to the user
 
@@ -172,13 +166,13 @@ type model struct {
 
 	tmpPath       string
 	inTmux        bool
-	layoutBottom  bool // layout: "bottom" — status bar top, search bar bottom, lists reversed
+	layoutBottom  bool
 	keys          keyMap
 	st            styles
 	spin          spinner.Model
 	loadingText   string
 	errMsg        string
-	errReturnMode inputMode       // mode to restore when the error banner is dismissed
+	errReturnMode inputMode
 	ctx           context.Context // cancelled when the program exits; kills in-flight clones
 }
 
@@ -218,7 +212,6 @@ func (m *model) addCandidates(cs ...candidates.Candidate) {
 	}
 }
 
-// sessionOf returns the resolved session of the candidate at path.
 func (m model) sessionOf(path string) string {
 	for _, it := range m.all {
 		if it.candidate.AbsPath == path {
@@ -315,7 +308,6 @@ func makeBaseItem(c candidates.Candidate, ts tmux.State) baseItem {
 	}
 }
 
-// tmpItems returns all tmp candidates from m.all (derived, not stored).
 func (m model) tmpItems() []baseItem {
 	var out []baseItem
 	for _, item := range m.all {
@@ -351,7 +343,6 @@ func (m model) maxRows() int {
 	return rows
 }
 
-// tilde shortens a path under the home dir to "~/…" for display.
 func tilde(path string) string {
 	if rest, ok := strings.CutPrefix(path, homePrefix()); ok && homePrefix() != "" {
 		return "~/" + rest

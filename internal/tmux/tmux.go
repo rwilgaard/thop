@@ -10,16 +10,14 @@ import (
 	"strings"
 )
 
-// State holds the set of active session and window names.
 type State struct {
-	Sessions      map[string]bool // session name → exists
+	Sessions      map[string]bool
 	Windows       map[string]bool // "session/window" → exists
 	Current       string          // empty outside tmux
 	CurrentWindow string
 	Last          string
 }
 
-// LoadState queries tmux for all active sessions and windows.
 func LoadState() State {
 	ts := State{
 		Sessions: map[string]bool{},
@@ -102,7 +100,6 @@ func HandleSelection(selected, root, session string) error {
 			}
 			_ = tmuxRun("kill-window", "-t", exact(sessionName)+":^")
 		}
-		hydrate(sessionName, projectDir)
 		return switchTo(sessionName)
 	}
 
@@ -139,16 +136,10 @@ func targetWindow(session, window string) string {
 	return exact(session) + ":=" + window
 }
 
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func hasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", exact(name)).Run() == nil
 }
 
-// KillWindow kills the named window in session.
 func KillWindow(session, window string) error {
 	return tmuxRun("kill-window", "-t", targetWindow(session, window))
 }
@@ -169,33 +160,12 @@ func openRepoWindow(session, repoPath string) error {
 	return nil
 }
 
-// newWindow appends a window named after path's base dir at the end of session.
 func newWindow(session, path string) error {
 	return tmuxRun("new-window", "-a", "-t", exact(session)+":{end}", "-n", filepath.Base(path), "-c", path)
 }
 
-func hydrate(session, projectDir string) {
-	home, _ := os.UserHomeDir()
-	local := filepath.Join(projectDir, ".thop")
-	global := filepath.Join(home, ".thop")
-
-	var src string
-	switch {
-	case pathExists(local):
-		src = local
-	case pathExists(global):
-		src = global
-	}
-	if src != "" {
-		_ = tmuxRun("send-keys", "-t", exact(session), "source "+shellQuote(src), "Enter")
-	}
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func switchTo(session string) error {
+// switchTo is a variable so tests can run without an attached client.
+var switchTo = func(session string) error {
 	if os.Getenv("TMUX") == "" {
 		cmd := exec.Command("tmux", "attach-session", "-t", exact(session))
 		cmd.Stdin = os.Stdin

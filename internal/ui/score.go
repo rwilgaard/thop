@@ -23,7 +23,6 @@ func normalizeScores(scores map[string]float64) map[string]float64 {
 	return out
 }
 
-// combineScore weights fuzzy 60%, frecency 40%.
 func combineScore(normFuzzyScore, normFrecency float64) float64 {
 	return normFuzzyScore*0.6 + normFrecency*0.4
 }
@@ -112,7 +111,6 @@ func sessionTier(it baseItem) int {
 }
 
 func (m *model) rebuildDestFiltered() {
-	// pool: non-repo candidates from m.all (projects + tmp projects)
 	pool := make([]baseItem, 0, len(m.all))
 	for _, item := range m.all {
 		if !item.candidate.IsRepo {

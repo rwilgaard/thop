@@ -102,8 +102,6 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// startClone records the clone request and kicks off the git clone with a
-// loading spinner.
 func (m model) startClone(dest string) (tea.Model, tea.Cmd) {
 	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest, Session: m.sessionOf(filepath.Dir(dest))}
 	m.clone.tiDest.Blur()

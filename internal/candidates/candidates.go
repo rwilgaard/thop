@@ -59,7 +59,6 @@ func Load(roots []string, tmpPath, cacheFile string) ([]Candidate, error) {
 	return Resolve(append(static, LoadTmp(tmpPath)...)), err
 }
 
-// MissingRoots returns the roots that are not directories on disk.
 func MissingRoots(roots []string) []string {
 	var missing []string
 	for _, r := range roots {
@@ -255,7 +254,6 @@ func Target(c Candidate) (session, window string) {
 	return session, window
 }
 
-// Active reports whether c corresponds to an open tmux session or window.
 func Active(c Candidate, ts tmux.State) bool {
 	session, window := Target(c)
 	if window != "" {
@@ -273,30 +271,25 @@ func Current(c Candidate, ts tmux.State) bool {
 	return window == "" || window == ts.CurrentWindow
 }
 
-// Previous reports whether c is the session the client was in last.
 func Previous(c Candidate, ts tmux.State) bool {
 	session, window := Target(c)
 	return ts.Last != "" && window == "" && session == ts.Last
 }
 
-// ValidName reports whether s is safe as a project directory name.
 func ValidName(s string) bool {
 	return s != "" && s != "." && s == strings.TrimSpace(s) &&
 		!strings.Contains(s, "/") && !strings.Contains(s, "..")
 }
 
-// ValidTmpName reports whether s is safe as a tmp project directory name.
 // Empty is allowed: the name is then generated.
 func ValidTmpName(s string) bool {
 	return s == "" || ValidName(s)
 }
 
-// AutoTmpName returns a timestamped fallback name for unnamed tmp projects.
 func AutoTmpName() string {
 	return "tmp-" + time.Now().Format("20060102-150405")
 }
 
-// LoadTmp returns every directory under tmpPath as a tmp candidate.
 func LoadTmp(tmpPath string) []Candidate {
 	entries, err := os.ReadDir(tmpPath)
 	if err != nil {
@@ -312,7 +305,6 @@ func LoadTmp(tmpPath string) []Candidate {
 	return out
 }
 
-// Tmp returns the candidate for the tmp project name under tmpPath.
 func Tmp(tmpPath, name string) Candidate {
 	return Candidate{
 		AbsPath: filepath.Join(tmpPath, name),

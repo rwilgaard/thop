@@ -61,7 +61,6 @@ func (m model) dialog(frameW, maxLines int) (dialog, bool) {
 	return d, ok
 }
 
-// clipLines cuts lines to maxLines, marking the cut with "…".
 func clipLines(lines []string, maxLines int) []string {
 	if len(lines) > maxLines {
 		return append(lines[:maxLines-1], "…")
@@ -252,7 +251,6 @@ func (st styles) renderDialog(d dialog) string {
 	return strings.Join(out, "\n")
 }
 
-// overlay centers box over base in a width×height frame.
 func overlay(base, box string, width, height int) string {
 	x := max(0, (width-lipgloss.Width(box))/2)
 	y := max(0, (height-lipgloss.Height(box))/2)

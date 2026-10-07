@@ -50,7 +50,6 @@ func Load(file string) (map[string]float64, error) {
 	return scores, nil
 }
 
-// Record increments the visit count and updates the last-access timestamp for relPath.
 // A flock on a sidecar file serializes concurrent thop instances so no
 // read-modify-write cycle loses updates.
 func Record(file, relPath string) error {

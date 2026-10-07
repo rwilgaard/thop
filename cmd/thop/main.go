@@ -100,7 +100,6 @@ func main() {
 		if err != nil {
 			fatalf("resolve path: %v", err)
 		}
-		// Best-effort root detection for direct invocation: walk config paths.
 		root := guessRoot(arg, cfg.Paths)
 		if err := frecency.Record(frecencyFile, arg); err != nil {
 			fmt.Fprintln(os.Stderr, "frecency:", err)

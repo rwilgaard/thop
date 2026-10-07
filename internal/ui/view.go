@@ -42,8 +42,6 @@ type listOpts struct {
 	reversed   bool
 }
 
-// emptyMsg returns an empty-state message: "Nothing here" if pool is empty or
-// query is empty, "No matches" otherwise.
 func emptyMsg(query string, pool int) string {
 	if pool == 0 || query == "" {
 		return "Nothing here"
@@ -70,7 +68,6 @@ func (m model) emptyMsg() string {
 	return emptyMsg(m.tiQuery.Value(), len(m.all))
 }
 
-// nonRepoCount returns the count of non-repo items in the slice.
 func nonRepoCount(items []baseItem) int {
 	count := 0
 	for _, item := range items {
@@ -235,8 +232,6 @@ func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 	return prefix + iconStyle.Render(glyph) + sp + name + padStr + right
 }
 
-// joinCols joins column blocks horizontally with the given gap, interleaving
-// gap strings between every pair of columns.
 func joinCols(cols []string, gap string) string {
 	parts := make([]string, 0, len(cols)*2-1)
 	for i, c := range cols {
@@ -392,7 +387,6 @@ func (m model) frame(width, maxRows int) string {
 	return strings.Join(append(lines, sepLine, last), "\n")
 }
 
-// modePill renders the current mode name as a filled badge for the status bar.
 func (st styles) modePill(label string) string {
 	return st.statusPill.Render(" " + label + " ")
 }
