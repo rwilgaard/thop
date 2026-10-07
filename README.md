@@ -30,6 +30,7 @@ thop                   # open picker
 thop -s                # start in the Open filter (active sessions)
 thop ~/projects/myapp  # open a path directly, no picker
 thop clone <url>       # pick a destination and clone
+thop clone owner/repo  # shorthand, expands via clone_shorthand
 thop tmp               # create a new tmp project and open it
 thop tmp myname        # create a named tmp project
 thop --version         # print version
@@ -44,15 +45,15 @@ With an empty query the session you came from is listed first and the one you're
 | Key | Action |
 |-----|--------|
 | Type | Filter |
-| `↑` / `Ctrl-K` | Move up (wraps) |
-| `↓` / `Ctrl-J` | Move down (wraps) |
+| `↑` / `Ctrl-K` / `Ctrl-P` | Move up (wraps) |
+| `↓` / `Ctrl-J` / `Ctrl-N` | Move down (wraps) |
 | `PgUp` / `Ctrl-U` | Page up |
 | `PgDn` / `Ctrl-D` | Page down |
 | `Enter` | Open |
 | `Tab` / `Shift-Tab` | Next / previous filter |
 | `Ctrl-Q` | Close the highlighted session or window |
-| `Ctrl-G` | Clone a git repo |
-| `Ctrl-N` | New tmp project |
+| `Ctrl-G` | Clone a git repo (`Esc` cancels a running clone) |
+| `Ctrl-T` | New tmp project |
 | `Ctrl-X` | Delete tmp projects |
 | `?` | Toggle full keymap |
 | `Esc` / `Ctrl-C` | Quit |
@@ -63,7 +64,7 @@ The status bar shows the filters (`All • Projects • Repos • Tmp • Open`)
 
 ### Tmp projects
 
-`Ctrl-N` creates a disposable scratch directory under `tmp_path` and opens it immediately as a tmux session. Projects appear in the picker with a `~` icon.
+`Ctrl-T` creates a disposable scratch directory under `tmp_path` and opens it immediately as a tmux session. Projects appear in the picker with a `~` icon.
 
 `Ctrl-X` opens a delete mode: type to filter the list, `Space` to select specific projects, `Enter` to confirm, `Esc` to cancel. With nothing selected, only the highlighted project is deleted. Open tmux sessions of deleted projects are killed.
 
@@ -78,6 +79,7 @@ paths:
 
 # tmp_path: ~/scratch  # defaults to ~/.cache/thop/tmp
 # layout: top           # or "bottom": status bar top, search bar bottom, list reversed
+# clone_shorthand: "https://github.com/{repo}.git"  # what "owner/repo" expands to when cloning
 
 # popup:                # size of the tmux popup thop opens itself in
 #   width: "60%"         # any tmux -w value (percent or fixed cols)
@@ -102,13 +104,13 @@ Every keybinding can be remapped. Omit any entry to keep its default:
 
 ```yaml
 # keymap:
-#   up: ["up", "ctrl+k"]
-#   down: ["down", "ctrl+j"]
+#   up: ["up", "ctrl+k", "ctrl+p"]
+#   down: ["down", "ctrl+j", "ctrl+n"]
 #   enter: ["enter"]
 #   quit: ["esc", "ctrl+c"]
 #   help: ["?"]
 #   clone: ["ctrl+g"]
-#   newtmp: ["ctrl+n"]
+#   newtmp: ["ctrl+t"]
 #   cleantmp: ["ctrl+x"]
 #   close: ["ctrl+q"]
 #   pageup: ["pgup", "ctrl+u"]

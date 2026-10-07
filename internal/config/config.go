@@ -38,13 +38,15 @@ type Icons struct {
 }
 
 type Config struct {
-	Paths   []string            `yaml:"paths"`
-	TmpPath string              `yaml:"tmp_path"`
-	Layout  string              `yaml:"layout"`
-	Popup   Popup               `yaml:"popup"`
-	Keymap  map[string][]string `yaml:"keymap"`
-	Colors  Colors              `yaml:"colors"`
-	Icons   Icons               `yaml:"icons"`
+	Paths   []string `yaml:"paths"`
+	TmpPath string   `yaml:"tmp_path"`
+	Layout  string   `yaml:"layout"`
+	// CloneShorthand expands "owner/repo" clone input; "{repo}" is replaced.
+	CloneShorthand string              `yaml:"clone_shorthand"`
+	Popup          Popup               `yaml:"popup"`
+	Keymap         map[string][]string `yaml:"keymap"`
+	Colors         Colors              `yaml:"colors"`
+	Icons          Icons               `yaml:"icons"`
 }
 
 const (
@@ -60,6 +62,7 @@ const (
 
 func defaultConfig() Config {
 	return Config{
+		CloneShorthand: "https://github.com/{repo}.git",
 		Popup: Popup{
 			Width:  "60%",
 			Height: "50%",
@@ -91,12 +94,15 @@ paths:
   # - ~/projects
   # - ~/work
 
-# Directory for disposable tmp projects (ctrl-n). Defaults to XDG_CACHE_HOME/thop/tmp.
+# Directory for disposable tmp projects (ctrl-t). Defaults to XDG_CACHE_HOME/thop/tmp.
 # tmp_path: ~/scratch
 
 # Search bar position: "top" (default) or "bottom" (status bar moves to top,
 # best match sits next to the search bar).
 # layout: "bottom"
+
+# Typing "owner/repo" as a clone URL expands through this template.
+# clone_shorthand: "https://github.com/{repo}.git"   # or "git@github.com:{repo}.git"
 
 # Popup size when thop re-execs itself inside a tmux popup.
 # Any tmux -w/-h value works (percent or fixed rows/cols).
@@ -108,13 +114,13 @@ paths:
 # Binding a plain character (like "k") makes it untypeable in the search
 # field. Binding the same key to two actions is rejected at startup.
 # keymap:
-#   up: ["up", "ctrl+k"]
-#   down: ["down", "ctrl+j"]
+#   up: ["up", "ctrl+k", "ctrl+p"]
+#   down: ["down", "ctrl+j", "ctrl+n"]
 #   enter: ["enter"]
 #   quit: ["esc", "ctrl+c"]
 #   help: ["?"]
 #   clone: ["ctrl+g"]
-#   newtmp: ["ctrl+n"]
+#   newtmp: ["ctrl+t"]
 #   cleantmp: ["ctrl+x"]
 #   close: ["ctrl+q"]
 #   pageup: ["pgup", "ctrl+u"]
@@ -189,6 +195,7 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	// an empty color renders with no attribute. Fields whose default is itself
 	// empty (match_color, help_*_color) are no-ops.
 	def := defaultConfig()
+	cfg.CloneShorthand = orDefault(cfg.CloneShorthand, def.CloneShorthand)
 	cfg.Popup.Width = orDefault(cfg.Popup.Width, def.Popup.Width)
 	cfg.Popup.Height = orDefault(cfg.Popup.Height, def.Popup.Height)
 	cfg.Colors = cfg.Colors.OrDefaults()

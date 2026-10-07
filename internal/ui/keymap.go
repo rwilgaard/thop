@@ -51,13 +51,13 @@ func (km *keyMap) byName() map[string]*key.Binding {
 // truthful after a remap.
 func buildKeyMap(cfg config.Config) keyMap {
 	km := keyMap{
-		Up:       key.NewBinding(key.WithKeys("up", "ctrl+k"), key.WithHelp("↑/ctrl-k", "Move up")),
-		Down:     key.NewBinding(key.WithKeys("down", "ctrl+j"), key.WithHelp("↓/ctrl-j", "Move down")),
+		Up:       key.NewBinding(key.WithKeys("up", "ctrl+k", "ctrl+p"), key.WithHelp("↑/ctrl-k/ctrl-p", "Move up")),
+		Down:     key.NewBinding(key.WithKeys("down", "ctrl+j", "ctrl+n"), key.WithHelp("↓/ctrl-j/ctrl-n", "Move down")),
 		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "Open selected")),
 		Quit:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "Quit")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "Toggle help")),
 		Clone:    key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl-g", "Clone repository")),
-		NewTmp:   key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl-n", "New tmp project")),
+		NewTmp:   key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl-t", "New tmp project")),
 		CleanTmp: key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl-x", "Delete tmp projects")),
 		// Direct filter jumps have no default keys; tab cycles.
 		All:      key.NewBinding(key.WithHelp("", "Show all")),

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -17,6 +18,7 @@ type dialog struct {
 	title string
 	lines []string
 	hints [][2]string
+	width int
 }
 
 func dialogWidth(frameW int) int {
@@ -37,14 +39,33 @@ func (m model) backdropMode() inputMode {
 		return modeDestPicker
 	case modeConfirmClean:
 		return modeCleanTmp
-	case modeConfirmClose:
+	case modeConfirmClose, modeHelp:
 		return modeNormal
+	case modeCloning:
+		return modeDestPicker
 	default:
 		return mode
 	}
 }
 
-func (m model) dialog(innerW, maxLines int) (dialog, bool) {
+func (m model) dialog(frameW, maxLines int) (dialog, bool) {
+	d, ok := m.dialogContent(frameW, maxLines)
+	if d.width == 0 {
+		d.width = dialogWidth(frameW)
+	}
+	return d, ok
+}
+
+// clipLines cuts lines to maxLines, marking the cut with "…".
+func clipLines(lines []string, maxLines int) []string {
+	if len(lines) > maxLines {
+		return append(lines[:maxLines-1], "…")
+	}
+	return lines
+}
+
+func (m model) dialogContent(frameW, maxLines int) (dialog, bool) {
+	innerW := dialogWidth(frameW) - 4
 	input := func(ti textinput.Model) string {
 		return m.st.prompt.Render(m.st.icons.Prompt+" ") + ti.View()
 	}
@@ -126,14 +147,32 @@ func (m model) dialog(innerW, maxLines int) (dialog, bool) {
 			lines: []string{strings.TrimPrefix(row, leftPad)},
 			hints: [][2]string{{"y", "Close"}, {"any key", "Cancel"}},
 		}, true
-	case modeError:
-		lines := strings.Split(lipgloss.Wrap(m.errMsg, innerW, ""), "\n")
-		if len(lines) > maxLines {
-			lines = append(lines[:maxLines-1], "…")
+	case modeCloning:
+		dest := m.result.Clone.Dest
+		into := filepath.Join(filepath.Base(filepath.Dir(dest)), filepath.Base(dest))
+		status, hints := m.clone.tiURL.Value(), [][2]string{{"esc", "Cancel"}}
+		if m.clone.cancelled {
+			status, hints = "Cancelling…", [][2]string{{"ctrl-c", "Quit"}}
 		}
+		url, _ := truncateName(status, nil, innerW-2)
+		return dialog{
+			title: "Cloning",
+			lines: []string{m.spin.View() + " " + url, m.st.sep.Render("→ " + into)},
+			hints: hints,
+		}, true
+	case modeHelp:
+		limit := max(12, frameW-8)
+		cols := m.st.helpColumns(limit, buildHelpGroups(m.keys))
+		return dialog{
+			title: "Help",
+			lines: clipLines(strings.Split(cols, "\n"), maxLines),
+			hints: [][2]string{{m.keys.Help.Help().Key, "Close"}},
+			width: min(frameW, max(16, min(lipgloss.Width(cols), limit)+4)),
+		}, true
+	case modeError:
 		return dialog{
 			title: "Error",
-			lines: lines,
+			lines: clipLines(strings.Split(lipgloss.Wrap(m.errMsg, innerW, ""), "\n"), maxLines),
 			hints: [][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}},
 		}, true
 	}
@@ -169,7 +208,8 @@ func (st styles) hintLines(pairs [][2]string, innerW int) []string {
 	return append(lines, cur)
 }
 
-func (st styles) renderDialog(d dialog, boxW int) string {
+func (st styles) renderDialog(d dialog) string {
+	boxW := d.width
 	innerW := boxW - 4
 	border := st.dialogBorder.Render
 	title, _ := truncateName(d.title, nil, boxW-5)

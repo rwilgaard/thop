@@ -16,7 +16,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sizeDialogInputs()
 		return m, nil
 	case spinner.TickMsg:
-		if m.inputMode == modeLoading {
+		if m.inputMode == modeLoading || m.inputMode == modeCloning {
 			var cmd tea.Cmd
 			m.spin, cmd = m.spin.Update(msg)
 			return m, cmd
@@ -28,12 +28,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case cloneDoneMsg:
+		if m.clone.cancel != nil {
+			m.clone.cancel()
+			m.clone.cancel = nil
+		}
+		if m.clone.cancelled {
+			m.clone.cancelled = false
+			m.result.Clone = nil
+			m.inputMode = modeURLInput
+			return m, m.clone.tiURL.Focus()
+		}
 		if msg.err != nil {
 			return m.showError(msg.err.Error(), modeURLInput), nil
 		}
 		m.result.Clone.Cloned = msg.path
 		if m.inTmux {
 			m.loadingText = "Opening…"
+			m.inputMode = modeLoading
 			return m, tea.Batch(cmdRunSelection(msg.path, ""), m.spin.Tick)
 		}
 		return m, tea.Quit
@@ -63,6 +74,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirmClean(msg)
 		case modeConfirmClose:
 			return m.updateConfirmClose(msg)
+		case modeCloning:
+			return m.updateCloning(msg)
+		case modeHelp:
+			return m.updateHelp(msg)
 		case modeLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -115,7 +130,7 @@ func (m model) forwardInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clean.cursor = 0
 			m.rebuildCleanFiltered()
 		}
-	case modeConfirmClean, modeConfirmClose, modeLoading, modeError:
+	case modeConfirmClean, modeConfirmClose, modeLoading, modeCloning, modeHelp, modeError:
 	}
 	return m, cmd
 }
@@ -128,18 +143,18 @@ func (m model) showError(msg string, returnMode inputMode) model {
 	return m
 }
 
-func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.showHelp {
-		switch {
-		case msg.String() == "ctrl+c":
-			return m, tea.Quit
-		case key.Matches(msg, m.keys.Quit) || key.Matches(msg, m.keys.Help):
-			m.showHelp = false
-			return m, m.tiQuery.Focus()
-		}
-		return m, nil
+func (m model) updateHelp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.String() == "ctrl+c":
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Quit) || key.Matches(msg, m.keys.Help):
+		m.inputMode = modeNormal
+		return m, m.tiQuery.Focus()
 	}
+	return m, nil
+}
 
+func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -193,7 +208,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.clean.tiQuery.Focus()
 	case key.Matches(msg, m.keys.Help):
 		m.tiQuery.Blur()
-		m.showHelp = true
+		m.inputMode = modeHelp
 	default:
 		// View filters share their binding↔mode pairs with the status bar tabs.
 		for _, t := range m.filterTabList() {

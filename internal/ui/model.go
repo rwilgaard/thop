@@ -31,11 +31,13 @@ const (
 	modeURLInput           // Ctrl-G
 	modeDestPicker
 	modeCloneName    // rename on conflict
-	modeNameInput    // Ctrl-N: typing tmp name
+	modeNameInput    // Ctrl-T: typing tmp name
 	modeCleanTmp     // Ctrl-X: search/select tmp projects
 	modeConfirmClean // y/N confirmation before delete
 	modeConfirmClose // y/N confirmation before killing a session or window
 	modeLoading
+	modeCloning // git clone running; esc cancels
+	modeHelp
 	modeError
 )
 
@@ -91,9 +93,12 @@ type cloneFlow struct {
 	destFiltered []scoredItem
 	destCursor   int
 	destDir      string // chosen parent dir (set when conflict detected)
+	shorthand    string
+	cancel       context.CancelFunc // non-nil while a clone is running
+	cancelled    bool
 }
 
-// tmpFlow holds Ctrl-N new-tmp-project state.
+// tmpFlow holds Ctrl-T new-tmp-project state.
 type tmpFlow struct {
 	tiName   textinput.Model
 	conflict bool // typed name already exists
@@ -131,7 +136,6 @@ type model struct {
 	loadState   func() tmux.State
 
 	tmpPath       string
-	showHelp      bool
 	inTmux        bool
 	layoutBottom  bool // layout: "bottom" — status bar top, search bar bottom, lists reversed
 	keys          keyMap
@@ -202,6 +206,8 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 			tiURL:  newTextInput("https://github.com/owner/repo.git"),
 			tiDest: newTextInput("Search folders…"),
 			tiName: newTextInput(""),
+
+			shorthand: cfg.CloneShorthand,
 		},
 		tmp: tmpFlow{
 			tiName: newTextInput("Name (empty = auto)"),
@@ -306,8 +312,8 @@ func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, sw
 
 func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
 	m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, inTmux)
+	m.tiQuery.Blur()
 	m.clone.tiURL.SetValue(cloneURL)
-	m.inputMode = modeDestPicker
-	m.rebuildDestFiltered()
+	_ = m.openDestPicker()
 	return runProgram(m)
 }

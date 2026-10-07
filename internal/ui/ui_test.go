@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -257,7 +259,7 @@ func TestView(t *testing.T) {
 		t.Error("help content should be hidden by default")
 	}
 
-	m.showHelp = true
+	m.inputMode = modeHelp
 	outHelp := m.View().Content
 	if !strings.Contains(outHelp, "Clone repository") {
 		t.Error("help overlay should show clone binding")
@@ -361,8 +363,8 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	if m.result.Clone.Dest != wantDest {
 		t.Errorf("Dest = %q, want %q", m.result.Clone.Dest, wantDest)
 	}
-	if m.inputMode != modeLoading {
-		t.Errorf("should be modeLoading after confirming clone name, got %v", m.inputMode)
+	if m.inputMode != modeCloning {
+		t.Errorf("should be modeCloning after confirming clone name, got %v", m.inputMode)
 	}
 }
 
@@ -559,18 +561,18 @@ func TestHelpOverlay(t *testing.T) {
 	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
-	if m.showHelp {
+	if m.inputMode == modeHelp {
 		t.Fatal("help should start hidden")
 	}
 
 	q := tea.KeyPressMsg{Text: "?", Code: '?'}
 	updated, _ := m.Update(q)
 	m = updated.(model)
-	if !m.showHelp {
+	if m.inputMode != modeHelp {
 		t.Error("? should show help")
 	}
 
-	out := m.View().Content
+	out := ansi.Strip(m.View().Content)
 	for _, w := range []string{"Navigate", "Actions", "Filters", "Clone repository", "Move up", "Next filter", "Close session", "Page down"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("help overlay missing %q", w)
@@ -579,29 +581,16 @@ func TestHelpOverlay(t *testing.T) {
 
 	updated, _ = m.Update(q)
 	m = updated.(model)
-	if m.showHelp {
+	if m.inputMode != modeNormal {
 		t.Error("second ? should hide help")
 	}
 
-	m.showHelp = true
+	m.inputMode = modeHelp
 	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
 	updated, _ = m.Update(esc)
 	m = updated.(model)
-	if m.showHelp {
+	if m.inputMode != modeNormal {
 		t.Error("esc should hide help")
-	}
-}
-
-func TestHelpOverlay_narrow(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
-	m.width, m.height, m.ready = 60, 24, true
-	m.showHelp = true
-
-	out := m.View().Content
-	for _, line := range strings.Split(out, "\n") {
-		if w := lipgloss.Width(line); w > 60 {
-			t.Errorf("line exceeds width 60 (got %d): %q", w, line)
-		}
 	}
 }
 
@@ -1192,8 +1181,11 @@ func TestDialog_fitsFrame(t *testing.T) {
 		{"clone name", modeCloneName, []string{"Name conflict", "repo already exists", "Clone as", "Back"}},
 		{"confirm", modeConfirmClean, []string{"Delete 1 tmp project?", "scratch", "Delete", "Cancel"}},
 		{"error", modeError, []string{"Error", "fatal: could not", "Dismiss"}},
+		{"cloning", modeCloning, []string{"Cloning", "→ proj/repo", "Cancel"}},
+		{"close", modeConfirmClose, []string{"Close session", "scratch", "Cancel"}},
+		{"help", modeHelp, []string{"Help", "Navigate", "Close"}},
 	}
-	sizes := []struct{ w, h int }{{30, 9}, {60, 16}, {100, 24}}
+	sizes := []struct{ w, h int }{{30, 9}, {60, 16}, {70, 20}, {100, 24}}
 	for _, tt := range tests {
 		for _, sz := range sizes {
 			t.Run(fmt.Sprintf("%s %dx%d", tt.name, sz.w, sz.h), func(t *testing.T) {
@@ -1203,6 +1195,8 @@ func TestDialog_fitsFrame(t *testing.T) {
 				m.rebuildCleanFiltered()
 				m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
 				m.errMsg = longErr
+				m.result.Clone = &CloneRequest{Dest: "/dest/proj/repo"}
+				m.closeTarget = m.all[0]
 				updated, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
 				m = updated.(model)
 				m.inputMode = tt.mode
@@ -1239,6 +1233,8 @@ func TestDialog_backdrop(t *testing.T) {
 		{"tmp name over picker", modeNameInput, modeNormal, modeNormal},
 		{"clone name over dest picker", modeCloneName, modeNormal, modeDestPicker},
 		{"confirm over clean list", modeConfirmClean, modeNormal, modeCleanTmp},
+		{"cloning over dest picker", modeCloning, modeNormal, modeDestPicker},
+		{"help over picker", modeHelp, modeNormal, modeNormal},
 		{"close over picker", modeConfirmClose, modeNormal, modeNormal},
 		{"error over picker", modeError, modeNormal, modeNormal},
 		{"error from url input over picker", modeError, modeURLInput, modeNormal},
@@ -1420,6 +1416,166 @@ func TestClose(t *testing.T) {
 					if it.active {
 						t.Errorf("%s still marked open after state reload", it.candidate.RelPath)
 					}
+				}
+			}
+		})
+	}
+}
+
+func TestURLInput_expandsShorthand(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{CloneShorthand: "https://github.com/{repo}.git"}, false)
+	m.inputMode = modeURLInput
+	m.clone.tiURL.SetValue("rwilgaard/thop")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(model)
+	if m.inputMode != modeDestPicker {
+		t.Fatalf("mode = %v, want modeDestPicker", m.inputMode)
+	}
+	if got := m.clone.tiURL.Value(); got != "https://github.com/rwilgaard/thop.git" {
+		t.Errorf("url = %q, want expanded shorthand", got)
+	}
+}
+
+func TestClone_cancel(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	start := func(t *testing.T) model {
+		t.Helper()
+		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+		m.width, m.height, m.ready = 80, 24, true
+		m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
+		updated, cmd := m.startClone("/dest/proj/repo")
+		if cmd == nil {
+			t.Fatal("startClone should return a cmd")
+		}
+		return updated.(model)
+	}
+
+	t.Run("dialog while cloning", func(t *testing.T) {
+		m := start(t)
+		plain := ansi.Strip(m.View().Content)
+		for _, w := range []string{"Cloning", "https://example.com/owner/repo.git", "→ proj/repo", "Cancel"} {
+			if !strings.Contains(plain, w) {
+				t.Errorf("missing %q in:\n%s", w, plain)
+			}
+		}
+	})
+
+	t.Run("esc cancels and returns to the url dialog", func(t *testing.T) {
+		m := start(t)
+		updated, _ := m.Update(esc)
+		m = updated.(model)
+		if !m.clone.cancelled || m.inputMode != modeCloning {
+			t.Fatalf("esc should mark cancelled and wait for git, got cancelled=%v mode=%v", m.clone.cancelled, m.inputMode)
+		}
+		if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "Cancelling…") {
+			t.Errorf("missing cancelling state in:\n%s", plain)
+		}
+
+		updated, _ = m.Update(cloneDoneMsg{err: context.Canceled})
+		m = updated.(model)
+		if m.inputMode != modeURLInput {
+			t.Errorf("mode = %v, want modeURLInput (no error dialog)", m.inputMode)
+		}
+		if m.clone.cancel != nil || m.clone.cancelled || m.result.Clone != nil {
+			t.Error("clone state should be reset after cancel")
+		}
+		if got := m.clone.tiURL.Value(); got != "https://example.com/owner/repo.git" {
+			t.Errorf("url = %q, should be kept for retry", got)
+		}
+	})
+
+	t.Run("failure without cancel still shows the error", func(t *testing.T) {
+		m := start(t)
+		updated, _ := m.Update(cloneDoneMsg{err: os.ErrPermission})
+		if got := updated.(model).inputMode; got != modeError {
+			t.Errorf("mode = %v, want modeError", got)
+		}
+	})
+
+	t.Run("esc does nothing for other loading states", func(t *testing.T) {
+		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+		m.inputMode, m.loadingText = modeLoading, "Opening…"
+		updated, cmd := m.Update(esc)
+		if cmd != nil || updated.(model).inputMode != modeLoading {
+			t.Error("esc should be ignored while opening")
+		}
+	})
+}
+
+func TestInputRow_hintsFitWhole(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/open", RelPath: "open"},
+		{AbsPath: "/t/scratch", RelPath: "scratch", IsTmp: true},
+	}
+	ts := tmux.State{Sessions: map[string]bool{"open": true}}
+	actions := []string{"Open", "Help", "Filter", "Close", "Clone", "Delete", "Select", "Cancel", "Back"}
+	for _, mode := range []inputMode{modeNormal, modeCleanTmp, modeDestPicker} {
+		for _, width := range []int{30, 40, 60, 100} {
+			t.Run(fmt.Sprintf("mode %d width %d", mode, width), func(t *testing.T) {
+				m := newModel(cs, map[string]float64{"/p/open": 1}, ts, false, config.Config{}, false)
+				m.rebuildCleanFiltered()
+				m.rebuildDestFiltered()
+				m.inputMode = mode
+				m.width, m.height, m.ready = width, 12, true
+				line := ansi.Strip(strings.Split(m.View().Content, "\n")[0])
+				if w := lipgloss.Width(line); w > width {
+					t.Errorf("row is %d cells, frame is %d: %q", w, width, line)
+				}
+				// every "<key>" must be followed by its whole action word
+				for _, part := range strings.Split(line, "<")[1:] {
+					_, action, _ := strings.Cut(part, "> ")
+					action = strings.TrimSpace(action)
+					if !slices.Contains(actions, action) {
+						t.Errorf("clipped hint %q in %q", action, line)
+					}
+				}
+			})
+		}
+	}
+
+	m := newModel(cs, map[string]float64{"/p/open": 1}, ts, false, config.Config{}, false)
+	if line := ansi.Strip(m.searchLine(120)); !strings.Contains(line, "Close") {
+		t.Errorf("open row should offer Close: %q", line)
+	}
+	m.cursor = 1
+	if line := ansi.Strip(m.searchLine(120)); strings.Contains(line, "Close") {
+		t.Errorf("row that isn't open should not offer Close: %q", line)
+	}
+}
+
+func TestHelpDialog_columns(t *testing.T) {
+	tests := []struct {
+		name    string
+		w, h    int
+		sameRow []string // titles that must share a line
+	}{
+		{"three columns", 100, 24, []string{"Navigate", "Actions", "Filters"}},
+		{"two columns", 70, 20, []string{"Navigate", "Actions"}},
+		{"stacked", 40, 30, []string{"Navigate"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+			m.width, m.height, m.ready = tt.w, tt.h, true
+			m.inputMode = modeHelp
+			plain := ansi.Strip(m.View().Content)
+			for _, w := range []string{"Actions", "Filters", "Next filter", "Close session"} {
+				if !strings.Contains(plain, w) {
+					t.Errorf("missing %q in:\n%s", w, plain)
+				}
+			}
+			for _, line := range strings.Split(plain, "\n") {
+				if !strings.Contains(line, "Navigate") {
+					continue
+				}
+				n := 0
+				for _, title := range []string{"Navigate", "Actions", "Filters"} {
+					if strings.Contains(line, title) {
+						n++
+					}
+				}
+				if n != len(tt.sameRow) {
+					t.Errorf("title row has %d groups, want %d: %q", n, len(tt.sameRow), line)
 				}
 			}
 		})

@@ -217,7 +217,9 @@ func joinCols(cols []string, gap string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-func (st styles) renderHelpOverlay(width int, groups []helpGroup) string {
+// helpColumns lays the help groups out in the widest arrangement that fits
+// limit: three columns, two (first group beside the rest), or stacked.
+func (st styles) helpColumns(limit int, groups []helpGroup) string {
 	cols := make([]string, 0, len(groups))
 	for _, g := range groups {
 		maxKey := 0
@@ -233,14 +235,19 @@ func (st styles) renderHelpOverlay(width int, groups []helpGroup) string {
 		cols = append(cols, strings.Join(lines, "\n"))
 	}
 
-	limit := max(0, width-1)
-	if joined := joinCols(cols, "    "); lipgloss.Width(joined) <= limit {
-		return joined
+	stacked := func(c []string) string { return strings.Join(c, "\n\n") }
+	if l := joinCols(cols, "    "); lipgloss.Width(l) <= limit {
+		return l
 	}
-	if joined := joinCols(cols, "  "); lipgloss.Width(joined) <= limit {
-		return joined
+	if l := joinCols(cols, "  "); lipgloss.Width(l) <= limit {
+		return l
 	}
-	return strings.Join(cols, "\n\n")
+	if len(cols) > 2 {
+		if l := joinCols([]string{cols[0], stacked(cols[1:])}, "  "); lipgloss.Width(l) <= limit {
+			return l
+		}
+	}
+	return stacked(cols)
 }
 
 func (m model) searchLine(width int) string {
@@ -249,44 +256,37 @@ func (m model) searchLine(width int) string {
 	case modeLoading:
 		return leftPad + m.spin.View() + " " + m.st.sep.Render(m.loadingText)
 	case modeCleanTmp:
-		hints := m.st.keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
-		return inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(), hints, width)
+		return m.st.inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(),
+			[][2]string{{"enter", "Delete"}, {"space", "Select"}, {"esc", "Cancel"}}, width)
 	case modeDestPicker:
-		hints := m.st.keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
-		return inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(), hints, width)
+		return m.st.inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(),
+			[][2]string{{"enter", "Select"}, {"esc", "Back"}}, width)
 	default:
-		label := m.st.prompt.Render(prompt + " ")
-		tiView := m.tiQuery.View()
-		if m.showHelp {
-			return leftPad + label + tiView
-		}
-		hints := m.st.keyHints([][2]string{
+		hints := [][2]string{
 			{m.keys.Enter.Help().Key, "Open"},
-			{m.keys.Clone.Help().Key, "Clone"},
 			{m.keys.Help.Help().Key, "Help"},
-		})
-		return inputRow(label, tiView, hints, width)
+			{m.keys.NextFilter.Help().Key, "Filter"},
+		}
+		if m.cursor < len(m.filtered) && m.filtered[m.cursor].base.active {
+			hints = append(hints, [2]string{m.keys.Close.Help().Key, "Close"})
+		}
+		hints = append(hints, [2]string{m.keys.Clone.Help().Key, "Clone"})
+		return m.st.inputRow(m.st.prompt.Render(prompt+" "), m.tiQuery.View(), hints, width)
 	}
 }
 
 func (m model) bodyLines(width, maxRows int) []string {
-	switch {
-	case m.inputMode == modeLoading:
+	switch m.inputMode {
+	case modeLoading:
 		return nil
-	case m.showHelp:
-		var lines []string
-		for _, line := range strings.Split(m.st.renderHelpOverlay(width, buildHelpGroups(m.keys)), "\n") {
-			lines = append(lines, leftPad+line)
-		}
-		return lines
-	case m.inputMode == modeCleanTmp:
+	case modeCleanTmp:
 		return m.st.renderRows(toListRows(m.clean.filtered), listOpts{
 			cursor: m.clean.cursor, maxRows: maxRows, width: width,
 			selected: m.clean.selected, showActive: true,
 			emptyMsg: emptyMsg(m.clean.tiQuery.Value(), len(m.tmpItems())),
 			reversed: m.layoutBottom,
 		})
-	case m.inputMode == modeDestPicker:
+	case modeDestPicker:
 		return m.st.renderRows(toListRows(m.clone.destFiltered), listOpts{
 			cursor: m.clone.destCursor, maxRows: maxRows, width: width,
 			emptyMsg: emptyMsg(m.clone.tiDest.Value(), nonRepoCount(m.all)),
@@ -312,9 +312,8 @@ func (m model) View() tea.View {
 	}
 	maxRows := m.maxRows()
 	frame := m.frame(width, maxRows)
-	boxW := dialogWidth(width)
-	if d, ok := m.dialog(boxW-4, maxRows-1); ok {
-		frame = overlay(frame, m.st.renderDialog(d, boxW), width, maxRows+4)
+	if d, ok := m.dialog(width, maxRows-1); ok {
+		frame = overlay(frame, m.st.renderDialog(d), width, maxRows+4)
 	}
 	return tea.NewView(frame)
 }
@@ -415,7 +414,7 @@ func (m model) statusBar(width int) string {
 	case modeCleanTmp, modeConfirmClean:
 		left = m.st.modePill("Clean") + "  " + m.st.sep.Render(fmt.Sprintf("%d selected", len(m.clean.selected)))
 		right = m.st.sep.Render(position(m.clean.cursor, len(m.clean.filtered)))
-	case modeURLInput, modeCloneName:
+	case modeURLInput, modeCloneName, modeCloning:
 		left = m.st.modePill("Clone")
 	case modeConfirmClose:
 		left = m.st.modePill("Close")

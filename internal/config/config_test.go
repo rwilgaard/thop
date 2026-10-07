@@ -242,3 +242,32 @@ func TestLoad_keymapOverride(t *testing.T) {
 		t.Errorf("Keymap[help] = %v, want [h]", got)
 	}
 }
+
+func TestLoad_cloneShorthand(t *testing.T) {
+	tests := []struct {
+		name, content, want string
+	}{
+		{"absent keeps default", "layout: top\n", "https://github.com/{repo}.git"},
+		{"empty backfilled", "clone_shorthand: \"\"\n", "https://github.com/{repo}.git"},
+		{"override", "clone_shorthand: \"git@github.com:{repo}.git\"\n", "git@github.com:{repo}.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgDir := filepath.Join(dir, "thop")
+			if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(dir, t.TempDir(), t.TempDir())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.CloneShorthand != tt.want {
+				t.Errorf("CloneShorthand = %q, want %q", cfg.CloneShorthand, tt.want)
+			}
+		})
+	}
+}

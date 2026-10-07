@@ -2,6 +2,7 @@ package ui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,8 +11,8 @@ import (
 
 func TestBuildKeyMap_defaults(t *testing.T) {
 	km := buildKeyMap(config.Config{})
-	if got := km.Up.Keys(); len(got) != 2 || got[0] != "up" || got[1] != "ctrl+k" {
-		t.Errorf("Up.Keys() = %v, want [up ctrl+k]", got)
+	if got := km.Up.Keys(); !slices.Equal(got, []string{"up", "ctrl+k", "ctrl+p"}) {
+		t.Errorf("Up.Keys() = %v, want [up ctrl+k ctrl+p]", got)
 	}
 	if got := km.Help.Keys(); len(got) != 1 || got[0] != "?" {
 		t.Errorf("Help.Keys() = %v, want [?]", got)
@@ -37,11 +38,11 @@ func TestBuildKeyMap_override(t *testing.T) {
 		t.Errorf("Help.Keys() = %v, want [h]", got)
 	}
 	// unrelated binding unaffected
-	if got := km.Down.Keys(); len(got) != 2 || got[0] != "down" || got[1] != "ctrl+j" {
-		t.Errorf("Down.Keys() = %v, want [down ctrl+j] (unaffected by unrelated override)", got)
+	if got := km.Down.Keys(); !slices.Equal(got, []string{"down", "ctrl+j", "ctrl+n"}) {
+		t.Errorf("Down.Keys() = %v, want [down ctrl+j ctrl+n] (unaffected by unrelated override)", got)
 	}
-	if got := km.Down.Help().Key; got != "↓/ctrl-j" {
-		t.Errorf("Down.Help().Key = %q, want %q", got, "↓/ctrl-j")
+	if got := km.Down.Help().Key; got != "↓/ctrl-j/ctrl-n" {
+		t.Errorf("Down.Help().Key = %q, want %q", got, "↓/ctrl-j/ctrl-n")
 	}
 }
 
