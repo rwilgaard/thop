@@ -4,6 +4,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/rwilgaard/thop/internal/candidates"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -60,6 +61,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCleanTmp(msg)
 		case modeConfirmClean:
 			return m.updateConfirmClean(msg)
+		case modeConfirmClose:
+			return m.updateConfirmClose(msg)
 		case modeLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -112,7 +115,7 @@ func (m model) forwardInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clean.cursor = 0
 			m.rebuildCleanFiltered()
 		}
-	case modeConfirmClean, modeLoading, modeError:
+	case modeConfirmClean, modeConfirmClose, modeLoading, modeError:
 	}
 	return m, cmd
 }
@@ -156,6 +159,20 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cursor = moveCursor(m.cursor, m.visualStep(-1), len(m.filtered))
 	case key.Matches(msg, m.keys.Down):
 		m.cursor = moveCursor(m.cursor, m.visualStep(1), len(m.filtered))
+	case key.Matches(msg, m.keys.PageUp):
+		m.cursor = pageCursor(m.cursor, m.pageStep(-1), len(m.filtered))
+	case key.Matches(msg, m.keys.PageDown):
+		m.cursor = pageCursor(m.cursor, m.pageStep(1), len(m.filtered))
+	case key.Matches(msg, m.keys.NextFilter):
+		m.cycleFilter(1)
+	case key.Matches(msg, m.keys.PrevFilter):
+		m.cycleFilter(-1)
+	case key.Matches(msg, m.keys.Close):
+		if m.cursor < len(m.filtered) && m.filtered[m.cursor].base.active {
+			m.closeTarget = m.filtered[m.cursor].base
+			m.tiQuery.Blur()
+			m.inputMode = modeConfirmClose
+		}
 	case key.Matches(msg, m.keys.Clone):
 		m.tiQuery.Blur()
 		m.inputMode = modeURLInput
@@ -189,6 +206,41 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.forwardInput(msg)
 	}
 	return m, nil
+}
+
+func (m *model) cycleFilter(dir int) {
+	tabs := m.filterTabList()
+	for i, t := range tabs {
+		if t.mode == m.view {
+			m.view = tabs[moveCursor(i, dir, len(tabs))].mode
+			break
+		}
+	}
+	m.cursor = 0
+	m.rebuildFiltered()
+}
+
+func (m model) updateConfirmClose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+	m.inputMode = modeNormal
+	if msg.Key().Text != "y" {
+		return m, m.tiQuery.Focus()
+	}
+	session, window := candidates.Target(m.closeTarget.candidate)
+	var err error
+	if window != "" {
+		err = m.killWindow(session, window)
+	} else {
+		err = m.killSession(m.ts, session)
+	}
+	m.refreshTmux()
+	m.rebuildFiltered()
+	if err != nil {
+		return m.showError("close "+m.closeTarget.candidate.RelPath+": "+err.Error(), modeNormal), nil
+	}
+	return m, m.tiQuery.Focus()
 }
 
 func (m model) updateError(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

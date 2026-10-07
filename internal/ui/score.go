@@ -82,9 +82,6 @@ func (m *model) filterScored(pool []baseItem, query string) []scoredItem {
 func (m *model) rebuildFiltered() {
 	pool := make([]baseItem, 0, len(m.all))
 	for _, item := range m.all {
-		if m.switchOnly && !item.active {
-			continue
-		}
 		if !m.matchesView(item) {
 			continue
 		}
@@ -159,6 +156,8 @@ func (m *model) matchesView(item baseItem) bool {
 		return item.candidate.IsRepo
 	case viewTmp:
 		return item.candidate.IsTmp
+	case viewOpen:
+		return item.active
 	default: // viewAll
 		return true
 	}

@@ -191,8 +191,8 @@ func readCache(cacheFile string, roots []string) ([]Candidate, error) {
 	return out, sc.Err()
 }
 
-// target returns the tmux session c opens in; window is empty for flat candidates.
-func target(c Candidate) (session, window string) {
+// Target returns the tmux session c opens in; window is empty for flat candidates.
+func Target(c Candidate) (session, window string) {
 	if parent, _, nested := strings.Cut(c.RelPath, "/"); nested {
 		return tmux.Sessionize(parent), filepath.Base(c.AbsPath)
 	}
@@ -201,7 +201,7 @@ func target(c Candidate) (session, window string) {
 
 // Active reports whether c corresponds to an open tmux session or window.
 func Active(c Candidate, ts tmux.State) bool {
-	session, window := target(c)
+	session, window := Target(c)
 	if window != "" {
 		return ts.Windows[session+"/"+window]
 	}
@@ -210,7 +210,7 @@ func Active(c Candidate, ts tmux.State) bool {
 
 // Current reports whether opening c would land where the client already is.
 func Current(c Candidate, ts tmux.State) bool {
-	session, window := target(c)
+	session, window := Target(c)
 	if ts.Current == "" || session != ts.Current {
 		return false
 	}
@@ -219,7 +219,7 @@ func Current(c Candidate, ts tmux.State) bool {
 
 // Previous reports whether c is the session the client was in last.
 func Previous(c Candidate, ts tmux.State) bool {
-	session, window := target(c)
+	session, window := Target(c)
 	return ts.Last != "" && window == "" && session == ts.Last
 }
 

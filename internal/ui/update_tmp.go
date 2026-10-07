@@ -58,6 +58,10 @@ func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clean.cursor = moveCursor(m.clean.cursor, m.visualStep(-1), len(m.clean.filtered))
 	case key.Matches(msg, m.keys.Down):
 		m.clean.cursor = moveCursor(m.clean.cursor, m.visualStep(1), len(m.clean.filtered))
+	case key.Matches(msg, m.keys.PageUp):
+		m.clean.cursor = pageCursor(m.clean.cursor, m.pageStep(-1), len(m.clean.filtered))
+	case key.Matches(msg, m.keys.PageDown):
+		m.clean.cursor = pageCursor(m.clean.cursor, m.pageStep(1), len(m.clean.filtered))
 	case msg.String() == "space":
 		if m.clean.cursor < len(m.clean.filtered) {
 			path := m.clean.filtered[m.clean.cursor].base.candidate.AbsPath
@@ -127,6 +131,7 @@ func (m model) cleanTargets() []baseItem {
 func (m *model) deleteTmp(toDelete map[string]bool) []string {
 	var kept []baseItem
 	var errMsgs []string
+	killed := false
 	for _, item := range m.all {
 		c := item.candidate
 		if c.IsTmp && toDelete[c.AbsPath] {
@@ -136,7 +141,8 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 				continue
 			}
 			if item.active {
-				if err := m.clean.kill(tmux.Sessionize(c.RelPath)); err != nil {
+				killed = true
+				if err := m.killSession(m.ts, tmux.Sessionize(c.RelPath)); err != nil {
 					errMsgs = append(errMsgs, "kill session "+c.RelPath+": "+err.Error())
 				}
 			}
@@ -145,5 +151,8 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 		kept = append(kept, item)
 	}
 	m.all = kept
+	if killed {
+		m.refreshTmux()
+	}
 	return errMsgs
 }
