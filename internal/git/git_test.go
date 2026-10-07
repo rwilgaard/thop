@@ -83,3 +83,18 @@ func TestExpandShorthand(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandShorthand_localPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "vendor", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	const tmpl = "https://github.com/{repo}.git"
+	if got := ExpandShorthand("vendor/lib", tmpl); got != "vendor/lib" {
+		t.Errorf("existing local path was expanded to %q", got)
+	}
+	if got := ExpandShorthand("vendor/other", tmpl); got != "https://github.com/vendor/other.git" {
+		t.Errorf("ExpandShorthand = %q, want the expanded URL", got)
+	}
+}

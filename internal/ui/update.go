@@ -33,8 +33,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clone.cancel()
 			m.clone.cancel = nil
 		}
-		if m.clone.cancelled {
-			m.clone.cancelled = false
+		cancelled := m.clone.cancelled
+		m.clone.cancelled = false
+		// esc can land after git already finished; the repo is there, so open it
+		if cancelled && msg.err != nil {
 			m.result.Clone = nil
 			m.inputMode = modeURLInput
 			return m, m.clone.tiURL.Focus()

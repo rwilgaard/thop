@@ -1799,6 +1799,8 @@ func TestNewProject(t *testing.T) {
 			{"", ""},
 			{"a/b", "Invalid name"},
 			{"..", "Invalid name"},
+			{".", "Invalid name"},
+			{"   ", ""},
 			{"taken", "Already exists"},
 		}
 		for _, tt := range tests {
@@ -1841,8 +1843,8 @@ func TestNewProject(t *testing.T) {
 
 	t.Run("no usable root", func(t *testing.T) {
 		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{Paths: []string{"/nope/gone"}}, false)
-		if m = send(m, ctrlN); m.inputMode != modeNormal {
-			t.Errorf("mode = %v, want modeNormal", m.inputMode)
+		if m = send(m, ctrlN); m.inputMode != modeError || !strings.Contains(m.errMsg, "No root") {
+			t.Errorf("mode = %v err = %q, want an error saying no root is usable", m.inputMode, m.errMsg)
 		}
 	})
 
@@ -1930,5 +1932,58 @@ func TestDefaultKeys_nav(t *testing.T) {
 	updated, _ := m.Update(ctrl('t'))
 	if got := updated.(model).inputMode; got != modeNameInput {
 		t.Errorf("ctrl+t: mode = %v, want modeNameInput", got)
+	}
+}
+
+func TestClone_escAfterSuccess(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
+	updated, _ := m.startClone("/dest/proj/repo")
+	updated, _ = updated.(model).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	updated, cmd := updated.(model).Update(cloneDoneMsg{path: "/dest/proj/repo"})
+	m = updated.(model)
+	if m.result.Clone == nil || m.result.Clone.Cloned != "/dest/proj/repo" {
+		t.Errorf("a clone that finished must be kept, got %+v", m.result.Clone)
+	}
+	if m.inputMode == modeURLInput || cmd == nil {
+		t.Errorf("mode = %v, should go on to open the clone", m.inputMode)
+	}
+}
+
+func TestMissingRoots_bottomLayout(t *testing.T) {
+	root := t.TempDir()
+	cs := []cand.Candidate{{AbsPath: filepath.Join(root, "a"), Root: root, RelPath: "a"}}
+	cfg := config.Config{Paths: []string{root, filepath.Join(root, "gone")}, Layout: "bottom"}
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, false)
+	m.width, m.height, m.ready = 80, 12, true
+
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	// status, separator, body…, separator, search
+	if !strings.Contains(lines[2], "Not found") {
+		t.Errorf("warning should sit at the top of the list, away from the search bar: %q", lines[2])
+	}
+	if best := lines[len(lines)-3]; !strings.Contains(best, "a") || strings.Contains(best, "Not found") {
+		t.Errorf("best match should hug the search bar: %q", best)
+	}
+}
+
+func TestDeleteTmp_reresolves(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmpDir, "foo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cs := cand.Resolve([]cand.Candidate{
+		{AbsPath: "/code/foo", Root: "/code", RelPath: "foo"},
+		cand.Tmp(tmpDir, "foo"),
+	})
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
+	if got := m.sessionOf("/code/foo"); got != "foo@code" {
+		t.Fatalf("session = %q, want foo@code while the tmp twin exists", got)
+	}
+	if errs := m.deleteTmp(map[string]bool{filepath.Join(tmpDir, "foo"): true}); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if got := m.sessionOf("/code/foo"); got != "foo" {
+		t.Errorf("session = %q, want plain foo once the twin is gone", got)
 	}
 }

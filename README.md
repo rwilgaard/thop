@@ -136,7 +136,7 @@ Filters can also be bound to direct keys. These have no defaults:
 #   open: ["alt+5"]
 ```
 
-Binding a plain character (like `k`) makes it untypeable in the search field, so stick to modifier keys for anything you'd also want to type. Binding the same key to two actions is rejected at startup.
+Binding a plain character (like `k`) makes it untypeable in the search field, so stick to modifier keys for anything you'd also want to type. A key you bind is taken away from the action that had it by default. Binding one key to two actions yourself is rejected at startup.
 
 Icons default to Nerd Font glyphs. Override any of them (use plain ASCII if your font lacks the glyphs). Omit an entry to keep its default:
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -39,6 +40,7 @@ func (m *model) openNewProject() tea.Cmd {
 	}
 	roots := m.projectRoots()
 	if len(roots) == 0 {
+		*m = m.showError("No root to create a project in: every configured root is missing or is itself a git repository.", modeNormal)
 		return nil
 	}
 	m.tiQuery.Blur()
@@ -97,7 +99,7 @@ func (m model) updateNewProjName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.inputMode = modeNormal
 		return m, m.tiQuery.Focus()
 	case key.Matches(msg, m.keys.Enter):
-		name := m.newProj.tiName.Value()
+		name := strings.TrimSpace(m.newProj.tiName.Value())
 		if name == "" {
 			return m, nil
 		}

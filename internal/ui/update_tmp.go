@@ -147,6 +147,7 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 		kept = append(kept, item)
 	}
 	m.all = kept
+	m.addCandidates() // a removed name may free another from its suffix
 	if killed {
 		m.refreshTmux()
 	}

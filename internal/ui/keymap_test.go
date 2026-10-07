@@ -88,13 +88,65 @@ func TestValidateKeymap(t *testing.T) {
 	if err := ValidateKeymap(config.Config{}); err != nil {
 		t.Errorf("ValidateKeymap(defaults) = %v, want nil", err)
 	}
-	cfg := config.Config{Keymap: map[string][]string{"help": {"esc"}}}
+	cfg := config.Config{Keymap: map[string][]string{"help": {"f1"}, "clone": {"f1"}}}
 	err := ValidateKeymap(cfg)
 	if err == nil {
-		t.Fatal("ValidateKeymap = nil, want duplicate-key error (esc bound to quit and help)")
+		t.Fatal("ValidateKeymap = nil, want duplicate-key error (f1 bound to help and clone)")
 	}
-	if !strings.Contains(err.Error(), "esc") {
+	if !strings.Contains(err.Error(), "f1") {
 		t.Errorf("error %q does not name the duplicate key", err)
+	}
+}
+
+func TestBuildKeyMap_userBindingTakesDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		keymap  map[string][]string
+		check   func(keyMap) (got []string, want []string)
+		wantErr string
+	}{
+		{
+			name:   "old newtmp config unbinds new project",
+			keymap: map[string][]string{"newtmp": {"ctrl+n"}},
+			check:  func(km keyMap) ([]string, []string) { return km.NewProject.Keys(), nil },
+		},
+		{
+			name:   "one of several default keys is taken",
+			keymap: map[string][]string{"help": {"esc"}},
+			check:  func(km keyMap) ([]string, []string) { return km.Quit.Keys(), []string{"ctrl+c"} },
+		},
+		{
+			name:    "last key of a required action",
+			keymap:  map[string][]string{"clone": {"enter"}},
+			wantErr: "enter has no key left",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Config{Keymap: tt.keymap}
+			err := ValidateKeymap(cfg)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ValidateKeymap = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateKeymap = %v, want nil", err)
+			}
+			if got, want := tt.check(buildKeyMap(cfg)); !slices.Equal(got, want) {
+				t.Errorf("keys = %v, want %v", got, want)
+			}
+		})
+	}
+
+	km := buildKeyMap(config.Config{Keymap: map[string][]string{"newtmp": {"ctrl+n"}}})
+	for _, g := range buildHelpGroups(km) {
+		for _, b := range g.keys {
+			if b.Help().Desc == "New project" {
+				t.Error("unbound action should not be listed in help")
+			}
+		}
 	}
 }
 

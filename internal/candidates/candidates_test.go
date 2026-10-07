@@ -214,6 +214,10 @@ func TestValidName(t *testing.T) {
 		{"a/b", false, false},
 		{"..", false, false},
 		{"a..b", false, false},
+		{".", false, false},
+		{" ", false, false},
+		{"app ", false, false},
+		{"my app", true, true},
 	}
 	for _, tt := range tests {
 		if got := ValidName(tt.in); got != tt.name {

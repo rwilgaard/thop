@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
 	"regexp"
@@ -25,9 +26,13 @@ func RepoNameFromURL(url string) string {
 var shorthandRe = regexp.MustCompile(`^[A-Za-z0-9][\w.-]*/[\w.-]+$`)
 
 // ExpandShorthand turns "owner/repo" into a clone URL by replacing "{repo}"
-// in tmpl. Anything else, or an empty tmpl, returns input unchanged.
+// in tmpl. Anything else, an empty tmpl, or an input that exists as a local
+// path returns input unchanged.
 func ExpandShorthand(input, tmpl string) string {
 	if tmpl == "" || !shorthandRe.MatchString(input) {
+		return input
+	}
+	if _, err := os.Stat(input); err == nil {
 		return input
 	}
 	return strings.ReplaceAll(tmpl, "{repo}", strings.TrimSuffix(input, ".git"))

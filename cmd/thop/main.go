@@ -59,8 +59,10 @@ func main() {
 	}
 	inTmux := os.Getenv("TMUX") != ""
 
+	// No setup dialog over a config that failed to parse: it would look
+	// unconfigured and the dialog would edit the broken file.
 	var addRoot ui.AddRoot
-	if len(cfg.Paths) == 0 {
+	if len(cfg.Paths) == 0 && cfgErr == nil {
 		addRoot = firstRun(cfg.File, home, cacheFile)
 	}
 
@@ -70,6 +72,9 @@ func main() {
 	validateKeymap := func() {
 		if *popup {
 			return
+		}
+		if cfgErr != nil && len(cfg.Paths) == 0 {
+			fatalf("no paths loaded, fix %s", cfg.File)
 		}
 		if err := ui.ValidateKeymap(cfg); err != nil {
 			fatalf("config: %v", err)
@@ -203,13 +208,14 @@ func loadAll(cfg config.Config, cacheFile string) []candidates.Candidate {
 }
 
 // sessionFor returns the session a directly-opened path belongs to: its own
-// if it is a known candidate, else its parent's. Empty when unknown.
+// if it is a known candidate, else its parent project's. Empty when unknown.
 func sessionFor(path string, cs []candidates.Candidate) string {
-	for _, p := range []string{path, filepath.Dir(path)} {
-		for _, c := range cs {
-			if c.AbsPath == p {
-				return c.Session
-			}
+	parent := filepath.Dir(path)
+	for _, c := range cs {
+		// a repo inside a project is a window, not a session of its own, so
+		// only a top-level parent lends its session
+		if c.AbsPath == path || (c.AbsPath == parent && !strings.Contains(c.RelPath, "/")) {
+			return c.Session
 		}
 	}
 	return ""

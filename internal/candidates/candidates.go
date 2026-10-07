@@ -281,7 +281,8 @@ func Previous(c Candidate, ts tmux.State) bool {
 
 // ValidName reports whether s is safe as a project directory name.
 func ValidName(s string) bool {
-	return s != "" && !strings.Contains(s, "/") && !strings.Contains(s, "..")
+	return s != "" && s != "." && s == strings.TrimSpace(s) &&
+		!strings.Contains(s, "/") && !strings.Contains(s, "..")
 }
 
 // ValidTmpName reports whether s is safe as a tmp project directory name.

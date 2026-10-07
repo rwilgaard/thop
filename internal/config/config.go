@@ -107,6 +107,7 @@ paths:
 # layout: "bottom"
 
 # Typing "owner/repo" as a clone URL expands through this template.
+# Set to "" to turn that off.
 # clone_shorthand: "https://github.com/{repo}.git"   # or "git@github.com:{repo}.git"
 
 # Popup size when thop re-execs itself inside a tmux popup.
@@ -117,7 +118,8 @@ paths:
 
 # Override default keybindings. Omit any binding to keep its default.
 # Binding a plain character (like "k") makes it untypeable in the search
-# field. Binding the same key to two actions is rejected at startup.
+# field. A key you bind is taken from the action that had it by default;
+# binding one key to two actions yourself is rejected at startup.
 # keymap:
 #   up: ["up", "ctrl+k"]
 #   down: ["down", "ctrl+j"]
@@ -239,7 +241,6 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	// an empty color renders with no attribute. Fields whose default is itself
 	// empty (match_color, help_*_color) are no-ops.
 	def := defaultConfig()
-	cfg.CloneShorthand = orDefault(cfg.CloneShorthand, def.CloneShorthand)
 	cfg.Popup.Width = orDefault(cfg.Popup.Width, def.Popup.Width)
 	cfg.Popup.Height = orDefault(cfg.Popup.Height, def.Popup.Height)
 	cfg.Colors = cfg.Colors.OrDefaults()

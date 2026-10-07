@@ -367,7 +367,12 @@ func (m model) frame(width, maxRows int) string {
 	search := clampWidth(bg.searchLine(width), width)
 	body := fillRows(bg.bodyLines(width, maxRows), maxRows, m.layoutBottom)
 	if len(m.missing) > 0 {
-		body = append(body, m.missingLine(width))
+		// far edge from the search bar, so it never sits between it and the best match
+		if m.layoutBottom {
+			body = append([]string{m.missingLine(width)}, body...)
+		} else {
+			body = append(body, m.missingLine(width))
+		}
 	}
 	if bg.inputMode != m.inputMode {
 		search = m.st.dim(search)

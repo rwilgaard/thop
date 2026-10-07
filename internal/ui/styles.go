@@ -86,6 +86,9 @@ func bracketKey(s string) string { return "<" + s + ">" }
 func (st styles) keyHints(pairs [][2]string) string {
 	var parts []string
 	for _, p := range pairs {
+		if p[0] == "" { // action is unbound
+			continue
+		}
 		key := st.prompt.Render(bracketKey(p[0]))
 		action := st.sep.Render(p[1])
 		parts = append(parts, key+" "+action)

@@ -250,7 +250,7 @@ func TestLoad_cloneShorthand(t *testing.T) {
 		name, content, want string
 	}{
 		{"absent keeps default", "layout: top\n", "https://github.com/{repo}.git"},
-		{"empty backfilled", "clone_shorthand: \"\"\n", "https://github.com/{repo}.git"},
+		{"empty turns it off", "clone_shorthand: \"\"\n", ""},
 		{"override", "clone_shorthand: \"git@github.com:{repo}.git\"\n", "git@github.com:{repo}.git"},
 	}
 	for _, tt := range tests {
