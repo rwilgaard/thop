@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	cand "github.com/rwilgaard/thop/internal/candidates"
 	"github.com/rwilgaard/thop/internal/config"
 	"github.com/rwilgaard/thop/internal/tmux"
@@ -759,10 +760,10 @@ func TestPrompts_modes(t *testing.T) {
 		mode inputMode
 		want []string
 	}{
-		{modeURLInput, []string{"Clone repository ❯", "Clone", "Cancel"}},
+		{modeURLInput, []string{"Clone repository", "Next", "Cancel"}},
 		{modeDestPicker, []string{"Clone › Destination ❯", "Select", "Back"}},
-		{modeCloneName, []string{"Clone › Name conflict ❯", "Clone as", "Back"}},
-		{modeNameInput, []string{"New tmp project ❯", "Create", "Cancel"}},
+		{modeCloneName, []string{"Name conflict", "Clone as", "Back"}},
+		{modeNameInput, []string{"New tmp project", "Create", "Cancel"}},
 		{modeCleanTmp, []string{"Delete tmp projects ❯", "Select", "Delete", "Cancel"}},
 	}
 	for _, tt := range tests {
@@ -1175,5 +1176,86 @@ func TestConfirmClean_overflow(t *testing.T) {
 	}
 	if !strings.Contains(out, "… and 16 more") {
 		t.Errorf("missing overflow count: %q", out)
+	}
+}
+
+func TestDialog_fitsFrame(t *testing.T) {
+	longErr := strings.Repeat("fatal: could not read from remote repository ", 8)
+	tests := []struct {
+		name  string
+		mode  inputMode
+		wants []string
+	}{
+		{"url", modeURLInput, []string{"Clone repository", "Next", "Cancel"}},
+		{"tmp name", modeNameInput, []string{"New tmp project", "Create", "Cancel"}},
+		{"clone name", modeCloneName, []string{"Name conflict", "repo already exists", "Clone as", "Back"}},
+		{"confirm", modeConfirmClean, []string{"Delete 1 tmp project?", "scratch", "Delete", "Cancel"}},
+		{"error", modeError, []string{"Error", "fatal: could not", "Dismiss"}},
+	}
+	sizes := []struct{ w, h int }{{30, 9}, {60, 16}, {100, 24}}
+	for _, tt := range tests {
+		for _, sz := range sizes {
+			t.Run(fmt.Sprintf("%s %dx%d", tt.name, sz.w, sz.h), func(t *testing.T) {
+				m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+				m.all = []baseItem{{candidate: cand.Candidate{AbsPath: "/t/scratch", RelPath: "scratch", IsTmp: true}}}
+				m.rebuildFiltered()
+				m.rebuildCleanFiltered()
+				m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
+				m.errMsg = longErr
+				updated, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
+				m = updated.(model)
+				m.inputMode = tt.mode
+
+				out := m.View().Content
+				lines := strings.Split(out, "\n")
+				if want := max(5, sz.h-4) + 4; len(lines) != want {
+					t.Errorf("frame has %d lines, want %d", len(lines), want)
+				}
+				for i, line := range lines {
+					if w := lipgloss.Width(line); w > sz.w {
+						t.Errorf("line %d is %d cells wide, frame is %d", i, w, sz.w)
+					}
+				}
+				plain := ansi.Strip(out)
+				for _, w := range tt.wants {
+					if !strings.Contains(plain, w) {
+						t.Errorf("missing %q in:\n%s", w, plain)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDialog_backdrop(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   inputMode
+		errRet inputMode
+		want   inputMode
+	}{
+		{"url over picker", modeURLInput, modeNormal, modeNormal},
+		{"tmp name over picker", modeNameInput, modeNormal, modeNormal},
+		{"clone name over dest picker", modeCloneName, modeNormal, modeDestPicker},
+		{"confirm over clean list", modeConfirmClean, modeNormal, modeCleanTmp},
+		{"error over picker", modeError, modeNormal, modeNormal},
+		{"error from url input over picker", modeError, modeURLInput, modeNormal},
+		{"no dialog", modeDestPicker, modeNormal, modeDestPicker},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+			m.inputMode, m.errReturnMode = tt.mode, tt.errRet
+			if got := m.backdropMode(); got != tt.want {
+				t.Errorf("backdropMode = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	m := newModel([]cand.Candidate{{AbsPath: "/p/visible", RelPath: "visible"}}, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.width, m.height, m.ready = 80, 24, true
+	m.inputMode = modeURLInput
+	if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "visible") {
+		t.Errorf("list should stay visible behind the dialog:\n%s", plain)
 	}
 }

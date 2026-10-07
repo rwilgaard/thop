@@ -30,6 +30,7 @@ type styles struct {
 	match          lipgloss.Style
 	helpKey        lipgloss.Style
 	helpDesc       lipgloss.Style
+	dialogBorder   lipgloss.Style
 }
 
 func newStyles(cfg config.Config) styles {
@@ -47,6 +48,7 @@ func newStyles(cfg config.Config) styles {
 	st.statusPill = lipgloss.NewStyle().Background(lipgloss.Color(c.StatusActiveColor)).Foreground(lipgloss.Black).Bold(true)
 	st.filterActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.SelectionFg)).Bold(true)
 	st.dimActive = lipgloss.NewStyle().Foreground(lipgloss.Color(c.ActiveColor))
+	st.dialogBorder = lipgloss.NewStyle().Foreground(lipgloss.Color(c.PromptColor))
 	st.tmpName = lipgloss.NewStyle().Foreground(lipgloss.Magenta)
 	match := c.MatchColor
 	if match == "" {
