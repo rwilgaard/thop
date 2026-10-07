@@ -102,7 +102,6 @@ func HandleSelection(selected, root, session string) error {
 			}
 			_ = tmuxRun("kill-window", "-t", exact(sessionName)+":^")
 		}
-		hydrate(sessionName, projectDir)
 		return switchTo(sessionName)
 	}
 
@@ -139,11 +138,6 @@ func targetWindow(session, window string) string {
 	return exact(session) + ":=" + window
 }
 
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func hasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", exact(name)).Run() == nil
 }
@@ -172,27 +166,6 @@ func openRepoWindow(session, repoPath string) error {
 // newWindow appends a window named after path's base dir at the end of session.
 func newWindow(session, path string) error {
 	return tmuxRun("new-window", "-a", "-t", exact(session)+":{end}", "-n", filepath.Base(path), "-c", path)
-}
-
-func hydrate(session, projectDir string) {
-	home, _ := os.UserHomeDir()
-	local := filepath.Join(projectDir, ".thop")
-	global := filepath.Join(home, ".thop")
-
-	var src string
-	switch {
-	case pathExists(local):
-		src = local
-	case pathExists(global):
-		src = global
-	}
-	if src != "" {
-		_ = tmuxRun("send-keys", "-t", exact(session), "source "+shellQuote(src), "Enter")
-	}
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // switchTo is a variable so tests can run without an attached client.

@@ -166,8 +166,6 @@ Terminals send `ctrl+i`, `ctrl+m` and `ctrl+[` as `tab`, `enter` and `esc`, so t
 
 **Frecency** — Selections are tracked and ranked with a 60/40 blend of fuzzy match score and frecency, so frequently visited paths surface quickly even with short queries.
 
-**Startup scripts** — After creating a new session, thop sources `.thop` in the project directory, falling back to `~/.thop`. Handy for window layouts, env vars, and so on.
-
 ## File locations
 
 Respects XDG dirs if set.
