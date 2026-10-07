@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -21,11 +22,7 @@ func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Enter):
 		if m.clone.tiURL.Value() != "" {
 			m.clone.tiURL.Blur()
-			m.clone.tiDest.SetValue("")
-			m.clone.destCursor = 0
-			m.rebuildDestFiltered()
-			m.inputMode = modeDestPicker
-			return m, m.clone.tiDest.Focus()
+			return m, m.openDestPicker()
 		}
 		return m, nil
 	default:
@@ -33,7 +30,33 @@ func (m model) updateURLInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// openDestPicker expands shorthand in the entered URL and switches to a fresh
+// destination picker.
+func (m *model) openDestPicker() tea.Cmd {
+	m.clone.tiURL.SetValue(git.ExpandShorthand(m.clone.tiURL.Value(), m.clone.shorthand))
+	m.clone.tiDest.SetValue("")
+	m.clone.destCursor = 0
+	m.rebuildDestFiltered()
+	m.inputMode = modeDestPicker
+	return m.clone.tiDest.Focus()
+}
+
+func (m model) updateCloning(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.String() == "ctrl+c":
+		return m, tea.Quit
+	case msg.String() == "esc" && !m.clone.cancelled:
+		m.clone.cancelled = true
+		m.clone.cancel()
+	}
+	return m, nil
+}
+
 func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if cur, ok := m.navCursor(msg, m.clone.destCursor, len(m.clone.destFiltered)); ok {
+		m.clone.destCursor = cur
+		return m, nil
+	}
 	switch {
 	case msg.String() == "ctrl+c":
 		return m, tea.Quit
@@ -55,18 +78,6 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.startClone(fullDest)
 		}
-		return m, nil
-	case key.Matches(msg, m.keys.Up):
-		m.clone.destCursor = moveCursor(m.clone.destCursor, m.visualStep(-1), len(m.clone.destFiltered))
-		return m, nil
-	case key.Matches(msg, m.keys.Down):
-		m.clone.destCursor = moveCursor(m.clone.destCursor, m.visualStep(1), len(m.clone.destFiltered))
-		return m, nil
-	case key.Matches(msg, m.keys.PageUp):
-		m.clone.destCursor = pageCursor(m.clone.destCursor, m.pageStep(-1), len(m.clone.destFiltered))
-		return m, nil
-	case key.Matches(msg, m.keys.PageDown):
-		m.clone.destCursor = pageCursor(m.clone.destCursor, m.pageStep(1), len(m.clone.destFiltered))
 		return m, nil
 	default:
 		return m.forwardInput(msg)
@@ -94,10 +105,11 @@ func (m model) updateCloneName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // startClone records the clone request and kicks off the git clone with a
 // loading spinner.
 func (m model) startClone(dest string) (tea.Model, tea.Cmd) {
-	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest}
+	m.result.Clone = &CloneRequest{URL: m.clone.tiURL.Value(), Dest: dest, Session: m.sessionOf(filepath.Dir(dest))}
 	m.clone.tiDest.Blur()
 	m.clone.tiName.Blur()
-	m.loadingText = "Cloning…"
-	m.inputMode = modeLoading
-	return m, tea.Batch(cmdClone(m.ctx, m.clone.tiURL.Value(), dest), m.spin.Tick)
+	m.inputMode = modeCloning
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.clone.cancel, m.clone.cancelled = cancel, false
+	return m, tea.Batch(cmdClone(ctx, m.clone.tiURL.Value(), dest), m.spin.Tick)
 }

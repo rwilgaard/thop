@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
-	"github.com/rwilgaard/thop/internal/tmux"
 )
 
 func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -46,6 +45,10 @@ func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if cur, ok := m.navCursor(msg, m.clean.cursor, len(m.clean.filtered)); ok {
+		m.clean.cursor = cur
+		return m, nil
+	}
 	switch {
 	case msg.String() == "ctrl+c":
 		return m, tea.Quit
@@ -54,14 +57,6 @@ func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.inputMode = modeNormal
 		m.clean.selected = make(map[string]bool)
 		return m, m.tiQuery.Focus()
-	case key.Matches(msg, m.keys.Up):
-		m.clean.cursor = moveCursor(m.clean.cursor, m.visualStep(-1), len(m.clean.filtered))
-	case key.Matches(msg, m.keys.Down):
-		m.clean.cursor = moveCursor(m.clean.cursor, m.visualStep(1), len(m.clean.filtered))
-	case key.Matches(msg, m.keys.PageUp):
-		m.clean.cursor = pageCursor(m.clean.cursor, m.pageStep(-1), len(m.clean.filtered))
-	case key.Matches(msg, m.keys.PageDown):
-		m.clean.cursor = pageCursor(m.clean.cursor, m.pageStep(1), len(m.clean.filtered))
 	case msg.String() == "space":
 		if m.clean.cursor < len(m.clean.filtered) {
 			path := m.clean.filtered[m.clean.cursor].base.candidate.AbsPath
@@ -142,7 +137,8 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 			}
 			if item.active {
 				killed = true
-				if err := m.killSession(m.ts, tmux.Sessionize(c.RelPath)); err != nil {
+				session, _ := candidates.Target(c)
+				if err := m.killSession(m.ts, session); err != nil {
 					errMsgs = append(errMsgs, "kill session "+c.RelPath+": "+err.Error())
 				}
 			}
@@ -151,6 +147,7 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 		kept = append(kept, item)
 	}
 	m.all = kept
+	m.addCandidates() // a removed name may free another from its suffix
 	if killed {
 		m.refreshTmux()
 	}

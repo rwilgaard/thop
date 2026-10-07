@@ -2,11 +2,15 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rwilgaard/thop/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,13 +42,16 @@ type Icons struct {
 }
 
 type Config struct {
-	Paths   []string            `yaml:"paths"`
-	TmpPath string              `yaml:"tmp_path"`
-	Layout  string              `yaml:"layout"`
-	Popup   Popup               `yaml:"popup"`
-	Keymap  map[string][]string `yaml:"keymap"`
-	Colors  Colors              `yaml:"colors"`
-	Icons   Icons               `yaml:"icons"`
+	File    string   `yaml:"-"` // where the config was loaded from
+	Paths   []string `yaml:"paths"`
+	TmpPath string   `yaml:"tmp_path"`
+	Layout  string   `yaml:"layout"`
+	// CloneShorthand expands "owner/repo" clone input; "{repo}" is replaced.
+	CloneShorthand string              `yaml:"clone_shorthand"`
+	Popup          Popup               `yaml:"popup"`
+	Keymap         map[string][]string `yaml:"keymap"`
+	Colors         Colors              `yaml:"colors"`
+	Icons          Icons               `yaml:"icons"`
 }
 
 const (
@@ -60,6 +67,7 @@ const (
 
 func defaultConfig() Config {
 	return Config{
+		CloneShorthand: "https://github.com/{repo}.git",
 		Popup: Popup{
 			Width:  "60%",
 			Height: "50%",
@@ -91,12 +99,16 @@ paths:
   # - ~/projects
   # - ~/work
 
-# Directory for disposable tmp projects (ctrl-n). Defaults to XDG_CACHE_HOME/thop/tmp.
+# Directory for disposable tmp projects (ctrl-t). Defaults to XDG_CACHE_HOME/thop/tmp.
 # tmp_path: ~/scratch
 
 # Search bar position: "top" (default) or "bottom" (status bar moves to top,
 # best match sits next to the search bar).
 # layout: "bottom"
+
+# Typing "owner/repo" as a clone URL expands through this template.
+# Set to "" to turn that off.
+# clone_shorthand: "https://github.com/{repo}.git"   # or "git@github.com:{repo}.git"
 
 # Popup size when thop re-execs itself inside a tmux popup.
 # Any tmux -w/-h value works (percent or fixed rows/cols).
@@ -106,7 +118,8 @@ paths:
 
 # Override default keybindings. Omit any binding to keep its default.
 # Binding a plain character (like "k") makes it untypeable in the search
-# field. Binding the same key to two actions is rejected at startup.
+# field. A key you bind is taken from the action that had it by default;
+# binding one key to two actions yourself is rejected at startup.
 # keymap:
 #   up: ["up", "ctrl+k"]
 #   down: ["down", "ctrl+j"]
@@ -114,7 +127,8 @@ paths:
 #   quit: ["esc", "ctrl+c"]
 #   help: ["?"]
 #   clone: ["ctrl+g"]
-#   newtmp: ["ctrl+n"]
+#   newtmp: ["ctrl+t"]
+#   newproject: ["ctrl+n"]
 #   cleantmp: ["ctrl+x"]
 #   close: ["ctrl+q"]
 #   pageup: ["pgup", "ctrl+u"]
@@ -151,17 +165,54 @@ paths:
 #   separator: "-" # horizontal rule rune
 `
 
+func configFile(xdgConfig string) string {
+	return filepath.Join(xdgConfig, "thop", "config.yaml")
+}
+
+var pathsKeyRe = regexp.MustCompile(`(?m)^paths:`)
+
+var emptyPathsRe = regexp.MustCompile(`(?m)^paths:[ \t]*(\[[ \t]*\])?[ \t]*(#.*)?$`)
+
+// AddPath adds path as a scan root in the config file, keeping the rest of
+// the file (comments included) as it is. It expects a file with no roots yet.
+func AddPath(file, path string) error {
+	data, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	entry := "paths:\n  - " + strconv.Quote(path)
+	content := string(data)
+	if loc := emptyPathsRe.FindStringIndex(content); loc != nil {
+		content = content[:loc[0]] + entry + content[loc[1]:]
+	} else if pathsKeyRe.MatchString(content) {
+		// a second paths key would make the file unparseable
+		return fmt.Errorf("%s already has a paths entry", file)
+	} else {
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += entry + "\n"
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.Write(file, func(w io.Writer) error {
+		_, err := io.WriteString(w, content)
+		return err
+	})
+}
+
 // Load reads config.yaml, falling back to defaults. A non-nil error means the
 // file existed but could not be read or parsed — defaults are still returned,
 // so callers can warn and continue.
 func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	tmpDefault := filepath.Join(xdgCache, "thop", "tmp")
 	cfg := defaultConfig()
-	dir := filepath.Join(xdgConfig, "thop")
-	path := filepath.Join(dir, "config.yaml")
+	path := configFile(xdgConfig)
+	cfg.File = path
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		_ = os.MkdirAll(dir, 0o755)
+		_ = os.MkdirAll(filepath.Dir(path), 0o755)
 		_ = os.WriteFile(path, []byte(exampleConfig), 0o644)
 		cfg.TmpPath = tmpDefault
 		return cfg, nil
@@ -172,16 +223,17 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		cfg = defaultConfig()
+		cfg.File = path
 		cfg.TmpPath = tmpDefault
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i, p := range cfg.Paths {
-		cfg.Paths[i] = expandHome(p, home)
+		cfg.Paths[i] = ExpandHome(p, home)
 	}
 	if cfg.TmpPath == "" {
 		cfg.TmpPath = tmpDefault
 	} else {
-		cfg.TmpPath = expandHome(cfg.TmpPath, home)
+		cfg.TmpPath = ExpandHome(cfg.TmpPath, home)
 	}
 	// yaml.Unmarshal over defaults keeps defaults for absent keys, but an
 	// explicit empty scalar ("") overwrites them. Reapply every default so a
@@ -239,7 +291,7 @@ func orDefault(v, def string) string {
 	return v
 }
 
-func expandHome(path, home string) string {
+func ExpandHome(path, home string) string {
 	if path == "~" {
 		return home
 	}

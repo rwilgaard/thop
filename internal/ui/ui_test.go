@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -257,7 +260,7 @@ func TestView(t *testing.T) {
 		t.Error("help content should be hidden by default")
 	}
 
-	m.showHelp = true
+	m.inputMode = modeHelp
 	outHelp := m.View().Content
 	if !strings.Contains(outHelp, "Clone repository") {
 		t.Error("help overlay should show clone binding")
@@ -361,8 +364,8 @@ func TestUpdateDestPicker_conflict(t *testing.T) {
 	if m.result.Clone.Dest != wantDest {
 		t.Errorf("Dest = %q, want %q", m.result.Clone.Dest, wantDest)
 	}
-	if m.inputMode != modeLoading {
-		t.Errorf("should be modeLoading after confirming clone name, got %v", m.inputMode)
+	if m.inputMode != modeCloning {
+		t.Errorf("should be modeCloning after confirming clone name, got %v", m.inputMode)
 	}
 }
 
@@ -559,18 +562,18 @@ func TestHelpOverlay(t *testing.T) {
 	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
 	m.width, m.height, m.ready = 100, 24, true
 
-	if m.showHelp {
+	if m.inputMode == modeHelp {
 		t.Fatal("help should start hidden")
 	}
 
 	q := tea.KeyPressMsg{Text: "?", Code: '?'}
 	updated, _ := m.Update(q)
 	m = updated.(model)
-	if !m.showHelp {
+	if m.inputMode != modeHelp {
 		t.Error("? should show help")
 	}
 
-	out := m.View().Content
+	out := ansi.Strip(m.View().Content)
 	for _, w := range []string{"Navigate", "Actions", "Filters", "Clone repository", "Move up", "Next filter", "Close session", "Page down"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("help overlay missing %q", w)
@@ -579,29 +582,16 @@ func TestHelpOverlay(t *testing.T) {
 
 	updated, _ = m.Update(q)
 	m = updated.(model)
-	if m.showHelp {
+	if m.inputMode != modeNormal {
 		t.Error("second ? should hide help")
 	}
 
-	m.showHelp = true
+	m.inputMode = modeHelp
 	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
 	updated, _ = m.Update(esc)
 	m = updated.(model)
-	if m.showHelp {
+	if m.inputMode != modeNormal {
 		t.Error("esc should hide help")
-	}
-}
-
-func TestHelpOverlay_narrow(t *testing.T) {
-	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
-	m.width, m.height, m.ready = 60, 24, true
-	m.showHelp = true
-
-	out := m.View().Content
-	for _, line := range strings.Split(out, "\n") {
-		if w := lipgloss.Width(line); w > 60 {
-			t.Errorf("line exceeds width 60 (got %d): %q", w, line)
-		}
 	}
 }
 
@@ -1192,8 +1182,13 @@ func TestDialog_fitsFrame(t *testing.T) {
 		{"clone name", modeCloneName, []string{"Name conflict", "repo already exists", "Clone as", "Back"}},
 		{"confirm", modeConfirmClean, []string{"Delete 1 tmp project?", "scratch", "Delete", "Cancel"}},
 		{"error", modeError, []string{"Error", "fatal: could not", "Dismiss"}},
+		{"cloning", modeCloning, []string{"Cloning", "→ proj/repo", "Cancel"}},
+		{"close", modeConfirmClose, []string{"Close session", "scratch", "Cancel"}},
+		{"help", modeHelp, []string{"Help", "Navigate", "Close"}},
+		{"setup", modeSetup, []string{"Add a project root", "Save", "Skip"}},
+		{"new project", modeNewProjName, []string{"New project", "Create", "Back"}},
 	}
-	sizes := []struct{ w, h int }{{30, 9}, {60, 16}, {100, 24}}
+	sizes := []struct{ w, h int }{{30, 9}, {60, 16}, {70, 20}, {100, 24}}
 	for _, tt := range tests {
 		for _, sz := range sizes {
 			t.Run(fmt.Sprintf("%s %dx%d", tt.name, sz.w, sz.h), func(t *testing.T) {
@@ -1203,6 +1198,8 @@ func TestDialog_fitsFrame(t *testing.T) {
 				m.rebuildCleanFiltered()
 				m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
 				m.errMsg = longErr
+				m.result.Clone = &CloneRequest{Dest: "/dest/proj/repo"}
+				m.closeTarget = m.all[0]
 				updated, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
 				m = updated.(model)
 				m.inputMode = tt.mode
@@ -1239,6 +1236,10 @@ func TestDialog_backdrop(t *testing.T) {
 		{"tmp name over picker", modeNameInput, modeNormal, modeNormal},
 		{"clone name over dest picker", modeCloneName, modeNormal, modeDestPicker},
 		{"confirm over clean list", modeConfirmClean, modeNormal, modeCleanTmp},
+		{"cloning over dest picker", modeCloning, modeNormal, modeDestPicker},
+		{"help over picker", modeHelp, modeNormal, modeNormal},
+		{"setup over picker", modeSetup, modeNormal, modeNormal},
+		{"new project name over picker", modeNewProjName, modeNormal, modeNormal},
 		{"close over picker", modeConfirmClose, modeNormal, modeNormal},
 		{"error over picker", modeError, modeNormal, modeNormal},
 		{"error from url input over picker", modeError, modeURLInput, modeNormal},
@@ -1423,5 +1424,566 @@ func TestClose(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestURLInput_expandsShorthand(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{CloneShorthand: "https://github.com/{repo}.git"}, false)
+	m.inputMode = modeURLInput
+	m.clone.tiURL.SetValue("rwilgaard/thop")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(model)
+	if m.inputMode != modeDestPicker {
+		t.Fatalf("mode = %v, want modeDestPicker", m.inputMode)
+	}
+	if got := m.clone.tiURL.Value(); got != "https://github.com/rwilgaard/thop.git" {
+		t.Errorf("url = %q, want expanded shorthand", got)
+	}
+}
+
+func TestClone_cancel(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	start := func(t *testing.T) model {
+		t.Helper()
+		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+		m.width, m.height, m.ready = 80, 24, true
+		m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
+		updated, cmd := m.startClone("/dest/proj/repo")
+		if cmd == nil {
+			t.Fatal("startClone should return a cmd")
+		}
+		return updated.(model)
+	}
+
+	t.Run("dialog while cloning", func(t *testing.T) {
+		m := start(t)
+		plain := ansi.Strip(m.View().Content)
+		for _, w := range []string{"Cloning", "https://example.com/owner/repo.git", "→ proj/repo", "Cancel"} {
+			if !strings.Contains(plain, w) {
+				t.Errorf("missing %q in:\n%s", w, plain)
+			}
+		}
+	})
+
+	t.Run("esc cancels and returns to the url dialog", func(t *testing.T) {
+		m := start(t)
+		updated, _ := m.Update(esc)
+		m = updated.(model)
+		if !m.clone.cancelled || m.inputMode != modeCloning {
+			t.Fatalf("esc should mark cancelled and wait for git, got cancelled=%v mode=%v", m.clone.cancelled, m.inputMode)
+		}
+		if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "Cancelling…") {
+			t.Errorf("missing cancelling state in:\n%s", plain)
+		}
+
+		updated, _ = m.Update(cloneDoneMsg{err: context.Canceled})
+		m = updated.(model)
+		if m.inputMode != modeURLInput {
+			t.Errorf("mode = %v, want modeURLInput (no error dialog)", m.inputMode)
+		}
+		if m.clone.cancel != nil || m.clone.cancelled || m.result.Clone != nil {
+			t.Error("clone state should be reset after cancel")
+		}
+		if got := m.clone.tiURL.Value(); got != "https://example.com/owner/repo.git" {
+			t.Errorf("url = %q, should be kept for retry", got)
+		}
+	})
+
+	t.Run("failure without cancel still shows the error", func(t *testing.T) {
+		m := start(t)
+		updated, _ := m.Update(cloneDoneMsg{err: os.ErrPermission})
+		if got := updated.(model).inputMode; got != modeError {
+			t.Errorf("mode = %v, want modeError", got)
+		}
+	})
+
+	t.Run("esc does nothing for other loading states", func(t *testing.T) {
+		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+		m.inputMode, m.loadingText = modeLoading, "Opening…"
+		updated, cmd := m.Update(esc)
+		if cmd != nil || updated.(model).inputMode != modeLoading {
+			t.Error("esc should be ignored while opening")
+		}
+	})
+}
+
+func TestInputRow_hintsFitWhole(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/open", RelPath: "open"},
+		{AbsPath: "/t/scratch", RelPath: "scratch", IsTmp: true},
+	}
+	ts := tmux.State{Sessions: map[string]bool{"open": true}}
+	actions := []string{"Open", "Help", "Filter", "Close", "Clone", "Delete", "Select", "Cancel", "Back"}
+	for _, mode := range []inputMode{modeNormal, modeCleanTmp, modeDestPicker} {
+		for _, width := range []int{30, 40, 60, 100} {
+			t.Run(fmt.Sprintf("mode %d width %d", mode, width), func(t *testing.T) {
+				m := newModel(cs, map[string]float64{"/p/open": 1}, ts, false, config.Config{}, false)
+				m.rebuildCleanFiltered()
+				m.rebuildDestFiltered()
+				m.inputMode = mode
+				m.width, m.height, m.ready = width, 12, true
+				line := ansi.Strip(strings.Split(m.View().Content, "\n")[0])
+				if w := lipgloss.Width(line); w > width {
+					t.Errorf("row is %d cells, frame is %d: %q", w, width, line)
+				}
+				// every "<key>" must be followed by its whole action word
+				for _, part := range strings.Split(line, "<")[1:] {
+					_, action, _ := strings.Cut(part, "> ")
+					action = strings.TrimSpace(action)
+					if !slices.Contains(actions, action) {
+						t.Errorf("clipped hint %q in %q", action, line)
+					}
+				}
+			})
+		}
+	}
+
+	m := newModel(cs, map[string]float64{"/p/open": 1}, ts, false, config.Config{}, false)
+	if line := ansi.Strip(m.searchLine(120)); !strings.Contains(line, "Close") {
+		t.Errorf("open row should offer Close: %q", line)
+	}
+	m.cursor = 1
+	if line := ansi.Strip(m.searchLine(120)); strings.Contains(line, "Close") {
+		t.Errorf("row that isn't open should not offer Close: %q", line)
+	}
+}
+
+func TestHelpDialog_columns(t *testing.T) {
+	tests := []struct {
+		name    string
+		w, h    int
+		sameRow []string // titles that must share a line
+	}{
+		{"three columns", 100, 24, []string{"Navigate", "Actions", "Filters"}},
+		{"two columns", 70, 20, []string{"Navigate", "Actions"}},
+		{"stacked", 40, 30, []string{"Navigate"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+			m.width, m.height, m.ready = tt.w, tt.h, true
+			m.inputMode = modeHelp
+			plain := ansi.Strip(m.View().Content)
+			for _, w := range []string{"Actions", "Filters", "Next filter", "Close session"} {
+				if !strings.Contains(plain, w) {
+					t.Errorf("missing %q in:\n%s", w, plain)
+				}
+			}
+			for _, line := range strings.Split(plain, "\n") {
+				if !strings.Contains(line, "Navigate") {
+					continue
+				}
+				n := 0
+				for _, title := range []string{"Navigate", "Actions", "Filters"} {
+					if strings.Contains(line, title) {
+						n++
+					}
+				}
+				if n != len(tt.sameRow) {
+					t.Errorf("title row has %d groups, want %d: %q", n, len(tt.sameRow), line)
+				}
+			}
+		})
+	}
+}
+
+func TestSetup(t *testing.T) {
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	start := func(t *testing.T, add func(string) (string, []cand.Candidate, error)) model {
+		t.Helper()
+		tmp := []cand.Candidate{{AbsPath: "/t/scratch", RelPath: "scratch", IsTmp: true}}
+		m := newModel(tmp, map[string]float64{}, tmux.State{}, false, config.Config{File: "/etc/thop/config.yaml"}, false)
+		m.setup.add = add
+		_ = m.openSetup()
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updated.(model)
+		m.setup.tiPath.SetValue("~/code")
+		return m
+	}
+	found := func(string) (string, []cand.Candidate, error) {
+		return "/r/projects", []cand.Candidate{{AbsPath: "/r/projects/app", Root: "/r/projects", RelPath: "app"}}, nil
+	}
+
+	t.Run("dialog starts empty", func(t *testing.T) {
+		m := start(t, found)
+		m.setup.tiPath.SetValue("")
+		updated, cmd := m.Update(enter)
+		if cmd != nil || updated.(model).inputMode != modeSetup {
+			t.Error("enter on an empty path should do nothing")
+		}
+		plain := ansi.Strip(m.View().Content)
+		for _, w := range []string{"Add a project root", "Save", "Skip"} {
+			if !strings.Contains(plain, w) {
+				t.Errorf("missing %q in:\n%s", w, plain)
+			}
+		}
+	})
+
+	t.Run("save fills the picker", func(t *testing.T) {
+		var got string
+		m := start(t, func(p string) (string, []cand.Candidate, error) {
+			got = p
+			return found(p)
+		})
+		updated, _ := m.Update(enter)
+		m = updated.(model)
+		if got != "~/code" {
+			t.Errorf("add called with %q, want ~/code", got)
+		}
+		if m.inputMode != modeNormal {
+			t.Fatalf("mode = %v, want modeNormal", m.inputMode)
+		}
+		var names []string
+		for _, it := range m.filtered {
+			names = append(names, it.base.candidate.RelPath)
+		}
+		if !slices.Equal(names, []string{"app", "scratch"}) {
+			t.Errorf("picker rows = %v, want [app scratch]", names)
+		}
+		if !slices.Equal(m.paths, []string{"/r/projects"}) {
+			t.Errorf("paths = %v, want the saved root", m.paths)
+		}
+	})
+
+	t.Run("error stays in the dialog until edited", func(t *testing.T) {
+		m := start(t, func(string) (string, []cand.Candidate, error) { return "", nil, errors.New("not a directory") })
+		updated, _ := m.Update(enter)
+		m = updated.(model)
+		if m.inputMode != modeSetup {
+			t.Fatalf("mode = %v, want modeSetup", m.inputMode)
+		}
+		if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "not a directory") {
+			t.Errorf("missing error in:\n%s", plain)
+		}
+		updated, _ = m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+		if got := updated.(model).setup.err; got != "" {
+			t.Errorf("typing should clear the error, got %q", got)
+		}
+	})
+
+	t.Run("skip lands in a picker that names the config file", func(t *testing.T) {
+		m := start(t, found)
+		m.all = nil
+		updated, _ := m.Update(esc)
+		m = updated.(model)
+		if m.inputMode != modeNormal {
+			t.Fatalf("mode = %v, want modeNormal", m.inputMode)
+		}
+		if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "No project roots. Add paths in /etc/thop/config.yaml") {
+			t.Errorf("missing empty-state hint in:\n%s", plain)
+		}
+	})
+
+	t.Run("with a clone url waiting, continues to the dest picker", func(t *testing.T) {
+		m := start(t, found)
+		m.clone.tiURL.SetValue("https://example.com/a/b.git")
+		updated, _ := m.Update(enter)
+		if got := updated.(model).inputMode; got != modeDestPicker {
+			t.Errorf("mode = %v, want modeDestPicker", got)
+		}
+	})
+}
+
+func TestMissingRoots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "ok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ok, gone := filepath.Join(root, "ok"), filepath.Join(root, "wrok")
+	var cs []cand.Candidate
+	for i := range 30 {
+		name := fmt.Sprintf("p%02d", i)
+		cs = append(cs, cand.Candidate{AbsPath: filepath.Join(ok, name), Root: ok, RelPath: name})
+	}
+
+	t.Run("all roots present", func(t *testing.T) {
+		m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{Paths: []string{ok}}, false)
+		m.width, m.height, m.ready = 80, 12, true
+		if out := m.View().Content; strings.Contains(out, "Not found") {
+			t.Errorf("unexpected warning: %q", out)
+		}
+		if got := m.maxRows(); got != 8 {
+			t.Errorf("maxRows = %d, want 8", got)
+		}
+	})
+
+	for _, width := range []int{30, 80, 200} {
+		t.Run(fmt.Sprintf("one missing, width %d", width), func(t *testing.T) {
+			cfg := config.Config{Paths: []string{ok, gone}, File: "/etc/thop/config.yaml"}
+			m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, false)
+			m.width, m.height, m.ready = width, 12, true
+			if got := m.maxRows(); got != 7 {
+				t.Errorf("maxRows = %d, want 7 (one row given to the warning)", got)
+			}
+			lines := strings.Split(m.View().Content, "\n")
+			if len(lines) != 12 {
+				t.Errorf("frame has %d lines, want 12", len(lines))
+			}
+			for i, line := range lines {
+				if w := lipgloss.Width(line); w > width {
+					t.Errorf("line %d is %d cells wide, frame is %d", i, w, width)
+				}
+			}
+			warn := ansi.Strip(lines[9])
+			if !strings.Contains(warn, "Not found") {
+				t.Errorf("warning row missing above the bottom separator: %q", warn)
+			}
+			if width == 200 && !strings.Contains(warn, gone+" — check /etc/thop/config.yaml") {
+				t.Errorf("warning should name the path and config file: %q", warn)
+			}
+		})
+	}
+}
+
+func TestNewProject(t *testing.T) {
+	ctrlN := tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+	send := func(m model, msgs ...tea.KeyPressMsg) model {
+		for _, msg := range msgs {
+			updated, _ := m.Update(msg)
+			m = updated.(model)
+		}
+		return m
+	}
+	setup := func(t *testing.T, roots int) (model, []string) {
+		t.Helper()
+		var paths []string
+		var cs []cand.Candidate
+		for i := range roots {
+			p := filepath.Join(t.TempDir(), fmt.Sprintf("root%d", i))
+			if err := os.MkdirAll(filepath.Join(p, "taken"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			paths = append(paths, p)
+			cs = append(cs, cand.Candidate{AbsPath: filepath.Join(p, "taken"), Root: p, RelPath: "taken"})
+		}
+		m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{Paths: paths}, false)
+		m.width, m.height, m.ready = 80, 24, true
+		return m, paths
+	}
+
+	t.Run("one root skips the picker", func(t *testing.T) {
+		m, paths := setup(t, 1)
+		m = send(m, ctrlN)
+		if m.inputMode != modeNewProjName || m.newProj.root != paths[0] {
+			t.Fatalf("mode = %v root = %q, want name dialog in %q", m.inputMode, m.newProj.root, paths[0])
+		}
+		if m = send(m, esc); m.inputMode != modeNormal {
+			t.Errorf("esc: mode = %v, want modeNormal", m.inputMode)
+		}
+	})
+
+	t.Run("several roots: pick, then esc steps back", func(t *testing.T) {
+		m, paths := setup(t, 2)
+		m = send(m, ctrlN)
+		if m.inputMode != modeNewProjRoot || len(m.newProj.filtered) != 2 {
+			t.Fatalf("mode = %v with %d roots, want root picker with 2", m.inputMode, len(m.newProj.filtered))
+		}
+		m = send(m, down, enter)
+		if m.inputMode != modeNewProjName || m.newProj.root != paths[1] {
+			t.Fatalf("mode = %v root = %q, want name dialog in %q", m.inputMode, m.newProj.root, paths[1])
+		}
+		if m = send(m, esc); m.inputMode != modeNewProjRoot {
+			t.Errorf("first esc: mode = %v, want modeNewProjRoot", m.inputMode)
+		}
+		if m = send(m, esc); m.inputMode != modeNormal {
+			t.Errorf("second esc: mode = %v, want modeNormal", m.inputMode)
+		}
+	})
+
+	t.Run("name validation", func(t *testing.T) {
+		tests := []struct{ name, wantErr string }{
+			{"", ""},
+			{"a/b", "Invalid name"},
+			{"..", "Invalid name"},
+			{".", "Invalid name"},
+			{"   ", ""},
+			{"taken", "Already exists"},
+		}
+		for _, tt := range tests {
+			m, _ := setup(t, 1)
+			m = send(m, ctrlN)
+			m.newProj.tiName.SetValue(tt.name)
+			m = send(m, enter)
+			if m.inputMode != modeNewProjName || m.newProj.err != tt.wantErr {
+				t.Errorf("%q: mode = %v err = %q, want dialog with %q", tt.name, m.inputMode, m.newProj.err, tt.wantErr)
+			}
+			if tt.wantErr != "" {
+				if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, tt.wantErr) {
+					t.Errorf("%q: missing %q in:\n%s", tt.name, tt.wantErr, plain)
+				}
+			}
+		}
+	})
+
+	t.Run("create adds the row and selects it", func(t *testing.T) {
+		m, paths := setup(t, 1)
+		m.view = viewRepo
+		m.tiQuery.SetValue("zzz")
+		m.rebuildFiltered()
+		m = send(m, ctrlN)
+		m.newProj.tiName.SetValue("fresh")
+		m = send(m, enter)
+
+		dest := filepath.Join(paths[0], "fresh")
+		if fi, err := os.Stat(dest); err != nil || !fi.IsDir() {
+			t.Fatalf("%s not created: %v", dest, err)
+		}
+		if m.inputMode != modeNormal || m.view != viewAll || m.tiQuery.Value() != "" {
+			t.Errorf("mode = %v view = %v query = %q, want normal/all/empty", m.inputMode, m.view, m.tiQuery.Value())
+		}
+		got := m.filtered[m.cursor].base.candidate
+		if got.AbsPath != dest || got.Root != paths[0] || got.RelPath != "fresh" {
+			t.Errorf("cursor on %+v, want the new project", got)
+		}
+	})
+
+	t.Run("no usable root", func(t *testing.T) {
+		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{Paths: []string{"/nope/gone"}}, false)
+		if m = send(m, ctrlN); m.inputMode != modeError || !strings.Contains(m.errMsg, "No root") {
+			t.Errorf("mode = %v err = %q, want an error saying no root is usable", m.inputMode, m.errMsg)
+		}
+	})
+
+	t.Run("no roots configured reopens setup", func(t *testing.T) {
+		m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+		m.setup.add = func(string) (string, []cand.Candidate, error) { return "", nil, nil }
+		_ = m.openSetup()
+		m = send(m, esc, ctrlN)
+		if m.inputMode != modeSetup {
+			t.Errorf("mode = %v, want modeSetup", m.inputMode)
+		}
+	})
+}
+
+func TestCollidingRows(t *testing.T) {
+	cs := cand.Resolve([]cand.Candidate{
+		{AbsPath: "/code/alpha", Root: "/code", RelPath: "alpha"},
+		{AbsPath: "/work/alpha", Root: "/work", RelPath: "alpha"},
+		{AbsPath: "/code/beta", Root: "/code", RelPath: "beta"},
+	})
+	ts := tmux.State{Sessions: map[string]bool{"alpha@work": true}}
+	m := newModel(cs, map[string]float64{}, ts, false, config.Config{}, false)
+	m.width, m.height, m.ready = 60, 12, true
+
+	rows := map[string]string{}
+	for _, line := range strings.Split(ansi.Strip(m.View().Content), "\n") {
+		for _, root := range []string{"/code", "/work"} {
+			if strings.Contains(line, "alpha") && strings.Contains(line, root) {
+				rows[root] = line
+			}
+		}
+		if strings.Contains(line, "beta") && strings.Contains(line, "/code") {
+			t.Errorf("unique name should not show its root: %q", line)
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("both alpha rows should name their root, got %v", rows)
+	}
+	if strings.Contains(rows["/code"], "open") || !strings.Contains(rows["/work"], "open") {
+		t.Errorf("only the /work alpha is open: %v", rows)
+	}
+
+	m.width = 20
+	for i, line := range strings.Split(m.View().Content, "\n") {
+		if w := lipgloss.Width(line); w > 20 {
+			t.Errorf("line %d is %d cells wide, frame is 20", i, w)
+		}
+	}
+}
+
+func TestAddCandidates_reresolves(t *testing.T) {
+	cs := cand.Resolve([]cand.Candidate{{AbsPath: "/code/alpha", Root: "/code", RelPath: "alpha"}})
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	if got := m.sessionOf("/code/alpha"); got != "alpha" {
+		t.Fatalf("session = %q, want alpha", got)
+	}
+	m.addCandidates(cand.Candidate{AbsPath: "/work/alpha", Root: "/work", RelPath: "alpha"})
+	if a, b := m.sessionOf("/code/alpha"), m.sessionOf("/work/alpha"); a != "alpha@code" || b != "alpha@work" {
+		t.Errorf("sessions = %q, %q; want alpha@code, alpha@work", a, b)
+	}
+}
+
+func TestDefaultKeys_nav(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/a", RelPath: "a"},
+		{AbsPath: "/p/b", RelPath: "b"},
+		{AbsPath: "/p/c", RelPath: "c"},
+	}
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	ctrl := func(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+
+	// ctrl+p is unbound: it must neither move the cursor nor leave the picker
+	steps := []struct {
+		key  rune
+		want int
+	}{{'j', 1}, {'j', 2}, {'k', 1}, {'p', 1}}
+	for i, st := range steps {
+		updated, _ := m.Update(ctrl(st.key))
+		m = updated.(model)
+		if m.cursor != st.want || m.inputMode != modeNormal {
+			t.Errorf("step %d (ctrl+%c): cursor = %d mode = %v, want cursor %d in modeNormal", i, st.key, m.cursor, m.inputMode, st.want)
+		}
+	}
+
+	updated, _ := m.Update(ctrl('t'))
+	if got := updated.(model).inputMode; got != modeNameInput {
+		t.Errorf("ctrl+t: mode = %v, want modeNameInput", got)
+	}
+}
+
+func TestClone_escAfterSuccess(t *testing.T) {
+	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.clone.tiURL.SetValue("https://example.com/owner/repo.git")
+	updated, _ := m.startClone("/dest/proj/repo")
+	updated, _ = updated.(model).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	updated, cmd := updated.(model).Update(cloneDoneMsg{path: "/dest/proj/repo"})
+	m = updated.(model)
+	if m.result.Clone == nil || m.result.Clone.Cloned != "/dest/proj/repo" {
+		t.Errorf("a clone that finished must be kept, got %+v", m.result.Clone)
+	}
+	if m.inputMode == modeURLInput || cmd == nil {
+		t.Errorf("mode = %v, should go on to open the clone", m.inputMode)
+	}
+}
+
+func TestMissingRoots_bottomLayout(t *testing.T) {
+	root := t.TempDir()
+	cs := []cand.Candidate{{AbsPath: filepath.Join(root, "a"), Root: root, RelPath: "a"}}
+	cfg := config.Config{Paths: []string{root, filepath.Join(root, "gone")}, Layout: "bottom"}
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, false)
+	m.width, m.height, m.ready = 80, 12, true
+
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	// status, separator, body…, separator, search
+	if !strings.Contains(lines[2], "Not found") {
+		t.Errorf("warning should sit at the top of the list, away from the search bar: %q", lines[2])
+	}
+	if best := lines[len(lines)-3]; !strings.Contains(best, "a") || strings.Contains(best, "Not found") {
+		t.Errorf("best match should hug the search bar: %q", best)
+	}
+}
+
+func TestDeleteTmp_reresolves(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmpDir, "foo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cs := cand.Resolve([]cand.Candidate{
+		{AbsPath: "/code/foo", Root: "/code", RelPath: "foo"},
+		cand.Tmp(tmpDir, "foo"),
+	})
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
+	if got := m.sessionOf("/code/foo"); got != "foo@code" {
+		t.Fatalf("session = %q, want foo@code while the tmp twin exists", got)
+	}
+	if errs := m.deleteTmp(map[string]bool{filepath.Join(tmpDir, "foo"): true}); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if got := m.sessionOf("/code/foo"); got != "foo" {
+		t.Errorf("session = %q, want plain foo once the twin is gone", got)
 	}
 }

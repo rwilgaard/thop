@@ -30,6 +30,7 @@ type keyMap struct {
 	NextFilter key.Binding
 	PrevFilter key.Binding
 	Open       key.Binding
+	NewProject key.Binding
 }
 
 // byName maps config keymap names to their bindings. Every keyMap field must
@@ -42,6 +43,7 @@ func (km *keyMap) byName() map[string]*key.Binding {
 		"repos": &km.Repos, "tmp": &km.Tmp, "open": &km.Open,
 		"close": &km.Close, "pageup": &km.PageUp, "pagedown": &km.PageDown,
 		"nextfilter": &km.NextFilter, "prevfilter": &km.PrevFilter,
+		"newproject": &km.NewProject,
 	}
 }
 
@@ -57,7 +59,7 @@ func buildKeyMap(cfg config.Config) keyMap {
 		Quit:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "Quit")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "Toggle help")),
 		Clone:    key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl-g", "Clone repository")),
-		NewTmp:   key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl-n", "New tmp project")),
+		NewTmp:   key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl-t", "New tmp project")),
 		CleanTmp: key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl-x", "Delete tmp projects")),
 		// Direct filter jumps have no default keys; tab cycles.
 		All:      key.NewBinding(key.WithHelp("", "Show all")),
@@ -69,21 +71,41 @@ func buildKeyMap(cfg config.Config) keyMap {
 		Close:      key.NewBinding(key.WithKeys("ctrl+q"), key.WithHelp("ctrl-q", "Close session")),
 		PageUp:     key.NewBinding(key.WithKeys("pgup", "ctrl+u"), key.WithHelp("pgup/ctrl-u", "Page up")),
 		PageDown:   key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn/ctrl-d", "Page down")),
+		NewProject: key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl-n", "New project")),
 		NextFilter: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "Next filter")),
 		PrevFilter: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift-tab", "Previous filter")),
 	}
 
-	overrides := km.byName()
+	bindings := km.byName()
+	taken := map[string]bool{} // keys the user bound
 	for name, keyStrs := range cfg.Keymap {
-		b, ok := overrides[name]
+		b, ok := bindings[name]
 		if !ok || len(keyStrs) == 0 {
 			continue
 		}
 		b.SetKeys(expandLegacyAliases(keyStrs)...)
 		b.SetHelp(keyLabel(keyStrs), b.Help().Desc)
+		for _, k := range b.Keys() {
+			taken[k] = true
+		}
+	}
+	// A key the user bound wins over another action's default, so a config
+	// written for older defaults keeps working when defaults move.
+	for name, b := range bindings {
+		if len(cfg.Keymap[name]) > 0 {
+			continue
+		}
+		kept := slices.DeleteFunc(slices.Clone(b.Keys()), func(k string) bool { return taken[k] })
+		if len(kept) < len(b.Keys()) {
+			b.SetKeys(kept...)
+			b.SetHelp(keyLabel(kept), b.Help().Desc)
+		}
 	}
 	return km
 }
+
+// required names the actions the picker can't work without.
+var required = []string{"up", "down", "enter", "quit"}
 
 // legacyAliases maps control keys that legacy terminal encoding sends as the
 // same byte as a named key — the event arrives as the named key, so a binding
@@ -107,10 +129,16 @@ func expandLegacyAliases(keys []string) []string {
 }
 
 // ValidateKeymap rejects a cfg.Keymap that binds the same key to two actions —
-// dispatch order would silently shadow one of them.
+// dispatch order would silently shadow one of them — or that takes the last
+// key from a required action.
 func ValidateKeymap(cfg config.Config) error {
 	km := buildKeyMap(cfg)
 	byName := km.byName()
+	for _, name := range required {
+		if len(byName[name].Keys()) == 0 {
+			return fmt.Errorf("keymap: %s has no key left, bind one", name)
+		}
+	}
 	// Sorted so a collision reports the two actions deterministically.
 	seen := map[string]string{} // key string -> binding name
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
@@ -163,15 +191,13 @@ type helpGroup struct {
 }
 
 func buildHelpGroups(km keyMap) []helpGroup {
-	filters := []key.Binding{km.NextFilter, km.PrevFilter}
-	for _, b := range []key.Binding{km.All, km.Projects, km.Repos, km.Tmp, km.Open} {
-		if len(b.Keys()) > 0 {
-			filters = append(filters, b)
-		}
+	filters := []key.Binding{km.NextFilter, km.PrevFilter, km.All, km.Projects, km.Repos, km.Tmp, km.Open}
+	bound := func(bs ...key.Binding) []key.Binding {
+		return slices.DeleteFunc(bs, func(b key.Binding) bool { return len(b.Keys()) == 0 })
 	}
 	return []helpGroup{
-		{"Navigate", []key.Binding{km.Up, km.Down, km.PageUp, km.PageDown, km.Enter, km.Quit}},
-		{"Actions", []key.Binding{km.Clone, km.NewTmp, km.CleanTmp, km.Close, km.Help}},
-		{"Filters", filters},
+		{"Navigate", bound(km.Up, km.Down, km.PageUp, km.PageDown, km.Enter, km.Quit)},
+		{"Actions", bound(km.Clone, km.NewProject, km.NewTmp, km.CleanTmp, km.Close, km.Help)},
+		{"Filters", bound(filters...)},
 	}
 }

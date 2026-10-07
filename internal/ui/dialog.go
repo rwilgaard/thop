@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -17,6 +18,7 @@ type dialog struct {
 	title string
 	lines []string
 	hints [][2]string
+	width int
 }
 
 func dialogWidth(frameW int) int {
@@ -37,14 +39,38 @@ func (m model) backdropMode() inputMode {
 		return modeDestPicker
 	case modeConfirmClean:
 		return modeCleanTmp
-	case modeConfirmClose:
+	case modeConfirmClose, modeHelp, modeSetup:
+		return modeNormal
+	case modeCloning:
+		return modeDestPicker
+	case modeNewProjName:
+		if m.newProj.picked {
+			return modeNewProjRoot
+		}
 		return modeNormal
 	default:
 		return mode
 	}
 }
 
-func (m model) dialog(innerW, maxLines int) (dialog, bool) {
+func (m model) dialog(frameW, maxLines int) (dialog, bool) {
+	d, ok := m.dialogContent(frameW, maxLines)
+	if d.width == 0 {
+		d.width = dialogWidth(frameW)
+	}
+	return d, ok
+}
+
+// clipLines cuts lines to maxLines, marking the cut with "…".
+func clipLines(lines []string, maxLines int) []string {
+	if len(lines) > maxLines {
+		return append(lines[:maxLines-1], "…")
+	}
+	return lines
+}
+
+func (m model) dialogContent(frameW, maxLines int) (dialog, bool) {
+	innerW := dialogWidth(frameW) - 4
 	input := func(ti textinput.Model) string {
 		return m.st.prompt.Render(m.st.icons.Prompt+" ") + ti.View()
 	}
@@ -54,6 +80,26 @@ func (m model) dialog(innerW, maxLines int) (dialog, bool) {
 			title: "Clone repository",
 			lines: []string{input(m.clone.tiURL)},
 			hints: [][2]string{{"enter", "Next"}, {"esc", "Cancel"}},
+		}, true
+	case modeSetup:
+		lines := []string{m.st.sep.Render("thop lists the folders inside it."), input(m.setup.tiPath)}
+		if m.setup.err != "" {
+			lines = append(lines, m.st.sep.Render(m.setup.err))
+		}
+		return dialog{
+			title: "Add a project root",
+			lines: lines,
+			hints: [][2]string{{"enter", "Save"}, {"esc", "Skip"}},
+		}, true
+	case modeNewProjName:
+		lines := []string{m.st.sep.Render("in " + tilde(m.newProj.root)), input(m.newProj.tiName)}
+		if m.newProj.err != "" {
+			lines = append(lines, m.st.sep.Render(m.newProj.err))
+		}
+		return dialog{
+			title: "New project",
+			lines: lines,
+			hints: [][2]string{{"enter", "Create"}, {"esc", "Back"}},
 		}, true
 	case modeNameInput:
 		lines := []string{input(m.tmp.tiName)}
@@ -126,14 +172,32 @@ func (m model) dialog(innerW, maxLines int) (dialog, bool) {
 			lines: []string{strings.TrimPrefix(row, leftPad)},
 			hints: [][2]string{{"y", "Close"}, {"any key", "Cancel"}},
 		}, true
-	case modeError:
-		lines := strings.Split(lipgloss.Wrap(m.errMsg, innerW, ""), "\n")
-		if len(lines) > maxLines {
-			lines = append(lines[:maxLines-1], "…")
+	case modeCloning:
+		dest := m.result.Clone.Dest
+		into := filepath.Join(filepath.Base(filepath.Dir(dest)), filepath.Base(dest))
+		status, hints := m.clone.tiURL.Value(), [][2]string{{"esc", "Cancel"}}
+		if m.clone.cancelled {
+			status, hints = "Cancelling…", [][2]string{{"ctrl-c", "Quit"}}
 		}
+		url := ansi.Truncate(status, innerW-2, "…")
+		return dialog{
+			title: "Cloning",
+			lines: []string{m.spin.View() + " " + url, m.st.sep.Render("→ " + into)},
+			hints: hints,
+		}, true
+	case modeHelp:
+		limit := max(12, frameW-8)
+		cols := m.st.helpColumns(limit, buildHelpGroups(m.keys))
+		return dialog{
+			title: "Help",
+			lines: clipLines(strings.Split(cols, "\n"), maxLines),
+			hints: [][2]string{{m.keys.Help.Help().Key, "Close"}},
+			width: min(frameW, max(16, min(lipgloss.Width(cols), limit)+4)),
+		}, true
+	case modeError:
 		return dialog{
 			title: "Error",
-			lines: lines,
+			lines: clipLines(strings.Split(lipgloss.Wrap(m.errMsg, innerW, ""), "\n"), maxLines),
 			hints: [][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}},
 		}, true
 	}
@@ -169,10 +233,11 @@ func (st styles) hintLines(pairs [][2]string, innerW int) []string {
 	return append(lines, cur)
 }
 
-func (st styles) renderDialog(d dialog, boxW int) string {
+func (st styles) renderDialog(d dialog) string {
+	boxW := d.width
 	innerW := boxW - 4
 	border := st.dialogBorder.Render
-	title, _ := truncateName(d.title, nil, boxW-5)
+	title := ansi.Truncate(d.title, boxW-5, "…")
 
 	rows := append(append(d.lines, ""), st.hintLines(d.hints, innerW)...)
 	out := make([]string, 0, len(rows)+2)
@@ -205,7 +270,8 @@ func (st styles) dim(line string) string {
 // horizontally past that.
 func (m *model) sizeDialogInputs() {
 	w := max(1, dialogWidth(m.width)-4-lipgloss.Width(m.st.icons.Prompt)-2)
-	for _, ti := range []*textinput.Model{&m.clone.tiURL, &m.clone.tiName, &m.tmp.tiName} {
+	for _, ti := range []*textinput.Model{&m.clone.tiURL, &m.clone.tiName, &m.tmp.tiName, &m.setup.tiPath, &m.newProj.tiName} {
 		ti.SetWidth(w)
+		ti.SetCursor(ti.Position()) // recompute the visible window for the new width
 	}
 }

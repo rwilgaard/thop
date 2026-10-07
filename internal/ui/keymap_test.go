@@ -2,6 +2,7 @@ package ui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 
 func TestBuildKeyMap_defaults(t *testing.T) {
 	km := buildKeyMap(config.Config{})
-	if got := km.Up.Keys(); len(got) != 2 || got[0] != "up" || got[1] != "ctrl+k" {
+	if got := km.Up.Keys(); !slices.Equal(got, []string{"up", "ctrl+k"}) {
 		t.Errorf("Up.Keys() = %v, want [up ctrl+k]", got)
 	}
 	if got := km.Help.Keys(); len(got) != 1 || got[0] != "?" {
@@ -37,7 +38,7 @@ func TestBuildKeyMap_override(t *testing.T) {
 		t.Errorf("Help.Keys() = %v, want [h]", got)
 	}
 	// unrelated binding unaffected
-	if got := km.Down.Keys(); len(got) != 2 || got[0] != "down" || got[1] != "ctrl+j" {
+	if got := km.Down.Keys(); !slices.Equal(got, []string{"down", "ctrl+j"}) {
 		t.Errorf("Down.Keys() = %v, want [down ctrl+j] (unaffected by unrelated override)", got)
 	}
 	if got := km.Down.Help().Key; got != "↓/ctrl-j" {
@@ -87,13 +88,65 @@ func TestValidateKeymap(t *testing.T) {
 	if err := ValidateKeymap(config.Config{}); err != nil {
 		t.Errorf("ValidateKeymap(defaults) = %v, want nil", err)
 	}
-	cfg := config.Config{Keymap: map[string][]string{"help": {"esc"}}}
+	cfg := config.Config{Keymap: map[string][]string{"help": {"f1"}, "clone": {"f1"}}}
 	err := ValidateKeymap(cfg)
 	if err == nil {
-		t.Fatal("ValidateKeymap = nil, want duplicate-key error (esc bound to quit and help)")
+		t.Fatal("ValidateKeymap = nil, want duplicate-key error (f1 bound to help and clone)")
 	}
-	if !strings.Contains(err.Error(), "esc") {
+	if !strings.Contains(err.Error(), "f1") {
 		t.Errorf("error %q does not name the duplicate key", err)
+	}
+}
+
+func TestBuildKeyMap_userBindingTakesDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		keymap  map[string][]string
+		check   func(keyMap) (got []string, want []string)
+		wantErr string
+	}{
+		{
+			name:   "old newtmp config unbinds new project",
+			keymap: map[string][]string{"newtmp": {"ctrl+n"}},
+			check:  func(km keyMap) ([]string, []string) { return km.NewProject.Keys(), nil },
+		},
+		{
+			name:   "one of several default keys is taken",
+			keymap: map[string][]string{"help": {"esc"}},
+			check:  func(km keyMap) ([]string, []string) { return km.Quit.Keys(), []string{"ctrl+c"} },
+		},
+		{
+			name:    "last key of a required action",
+			keymap:  map[string][]string{"clone": {"enter"}},
+			wantErr: "enter has no key left",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Config{Keymap: tt.keymap}
+			err := ValidateKeymap(cfg)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ValidateKeymap = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateKeymap = %v, want nil", err)
+			}
+			if got, want := tt.check(buildKeyMap(cfg)); !slices.Equal(got, want) {
+				t.Errorf("keys = %v, want %v", got, want)
+			}
+		})
+	}
+
+	km := buildKeyMap(config.Config{Keymap: map[string][]string{"newtmp": {"ctrl+n"}}})
+	for _, g := range buildHelpGroups(km) {
+		for _, b := range g.keys {
+			if b.Help().Desc == "New project" {
+				t.Error("unbound action should not be listed in help")
+			}
+		}
 	}
 }
 

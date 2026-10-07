@@ -3,6 +3,7 @@ package ui
 import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
 )
@@ -16,7 +17,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sizeDialogInputs()
 		return m, nil
 	case spinner.TickMsg:
-		if m.inputMode == modeLoading {
+		if m.inputMode == modeLoading || m.inputMode == modeCloning {
 			var cmd tea.Cmd
 			m.spin, cmd = m.spin.Update(msg)
 			return m, cmd
@@ -28,13 +29,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case cloneDoneMsg:
+		if m.clone.cancel != nil {
+			m.clone.cancel()
+			m.clone.cancel = nil
+		}
+		cancelled := m.clone.cancelled
+		m.clone.cancelled = false
+		// esc can land after git already finished; the repo is there, so open it
+		if cancelled && msg.err != nil {
+			m.result.Clone = nil
+			m.inputMode = modeURLInput
+			return m, m.clone.tiURL.Focus()
+		}
 		if msg.err != nil {
 			return m.showError(msg.err.Error(), modeURLInput), nil
 		}
 		m.result.Clone.Cloned = msg.path
 		if m.inTmux {
 			m.loadingText = "Opening…"
-			return m, tea.Batch(cmdRunSelection(msg.path, ""), m.spin.Tick)
+			m.inputMode = modeLoading
+			return m, tea.Batch(cmdRunSelection(msg.path, "", m.result.Clone.Session), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case tmpCreatedMsg:
@@ -42,9 +56,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.showError(msg.err.Error(), modeNameInput), nil
 		}
 		m.result.Tmp.Path = msg.path
+		m.addCandidates(candidates.Tmp(m.tmpPath, m.result.Tmp.Name))
+		m.result.Tmp.Session = m.sessionOf(msg.path)
 		if m.inTmux {
 			m.loadingText = "Opening…"
-			return m, tea.Batch(cmdRunSelection(msg.path, m.tmpPath), m.spin.Tick)
+			return m, tea.Batch(cmdRunSelection(msg.path, m.tmpPath, m.result.Tmp.Session), m.spin.Tick)
 		}
 		return m, tea.Quit
 	case tea.KeyPressMsg:
@@ -63,6 +79,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirmClean(msg)
 		case modeConfirmClose:
 			return m.updateConfirmClose(msg)
+		case modeCloning:
+			return m.updateCloning(msg)
+		case modeHelp:
+			return m.updateHelp(msg)
+		case modeSetup:
+			return m.updateSetup(msg)
+		case modeNewProjRoot:
+			return m.updateNewProjRoot(msg)
+		case modeNewProjName:
+			return m.updateNewProjName(msg)
 		case modeLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -83,41 +109,71 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handlers and the catch-all message path.
 func (m model) forwardInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	var changed bool
 	switch m.inputMode {
 	case modeNormal:
-		prev := m.tiQuery.Value()
-		m.tiQuery, cmd = m.tiQuery.Update(msg)
-		if m.tiQuery.Value() != prev {
+		if cmd, changed = updateInput(&m.tiQuery, msg); changed {
 			m.cursor = 0
 			m.rebuildFiltered()
 		}
 	case modeURLInput:
-		m.clone.tiURL, cmd = m.clone.tiURL.Update(msg)
+		cmd, _ = updateInput(&m.clone.tiURL, msg)
 	case modeDestPicker:
-		prev := m.clone.tiDest.Value()
-		m.clone.tiDest, cmd = m.clone.tiDest.Update(msg)
-		if m.clone.tiDest.Value() != prev {
+		if cmd, changed = updateInput(&m.clone.tiDest, msg); changed {
 			m.clone.destCursor = 0
 			m.rebuildDestFiltered()
 		}
 	case modeCloneName:
-		m.clone.tiName, cmd = m.clone.tiName.Update(msg)
+		cmd, _ = updateInput(&m.clone.tiName, msg)
 	case modeNameInput:
-		prev := m.tmp.tiName.Value()
-		m.tmp.tiName, cmd = m.tmp.tiName.Update(msg)
-		if m.tmp.tiName.Value() != prev {
+		if cmd, changed = updateInput(&m.tmp.tiName, msg); changed {
 			m.tmp.conflict = false
 		}
 	case modeCleanTmp:
-		prev := m.clean.tiQuery.Value()
-		m.clean.tiQuery, cmd = m.clean.tiQuery.Update(msg)
-		if m.clean.tiQuery.Value() != prev {
+		if cmd, changed = updateInput(&m.clean.tiQuery, msg); changed {
 			m.clean.cursor = 0
 			m.rebuildCleanFiltered()
 		}
-	case modeConfirmClean, modeConfirmClose, modeLoading, modeError:
+	case modeNewProjRoot:
+		if cmd, changed = updateInput(&m.newProj.tiRoot, msg); changed {
+			m.newProj.cursor = 0
+			m.rebuildNewProjFiltered()
+		}
+	case modeNewProjName:
+		if cmd, changed = updateInput(&m.newProj.tiName, msg); changed {
+			m.newProj.err = ""
+		}
+	case modeSetup:
+		if cmd, changed = updateInput(&m.setup.tiPath, msg); changed {
+			m.setup.err = ""
+		}
+	case modeConfirmClean, modeConfirmClose, modeLoading, modeCloning, modeHelp, modeError:
 	}
 	return m, cmd
+}
+
+// updateInput feeds msg to ti and reports whether its value changed.
+func updateInput(ti *textinput.Model, msg tea.Msg) (tea.Cmd, bool) {
+	prev := ti.Value()
+	var cmd tea.Cmd
+	*ti, cmd = ti.Update(msg)
+	return cmd, ti.Value() != prev
+}
+
+// navCursor applies a cursor-movement key to a list of n rows: up/down wrap,
+// page keys clamp. ok is false when msg is not a movement key.
+func (m model) navCursor(msg tea.KeyPressMsg, cur, n int) (next int, ok bool) {
+	switch {
+	case key.Matches(msg, m.keys.Up):
+		return moveCursor(cur, m.visualStep(-1), n), true
+	case key.Matches(msg, m.keys.Down):
+		return moveCursor(cur, m.visualStep(1), n), true
+	case key.Matches(msg, m.keys.PageUp):
+		return pageCursor(cur, m.pageStep(-1), n), true
+	case key.Matches(msg, m.keys.PageDown):
+		return pageCursor(cur, m.pageStep(1), n), true
+	}
+	return cur, false
 }
 
 // showError switches to the error banner; returnMode is restored on dismiss.
@@ -128,18 +184,22 @@ func (m model) showError(msg string, returnMode inputMode) model {
 	return m
 }
 
+func (m model) updateHelp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.String() == "ctrl+c":
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Quit) || key.Matches(msg, m.keys.Help):
+		m.inputMode = modeNormal
+		return m, m.tiQuery.Focus()
+	}
+	return m, nil
+}
+
 func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.showHelp {
-		switch {
-		case msg.String() == "ctrl+c":
-			return m, tea.Quit
-		case key.Matches(msg, m.keys.Quit) || key.Matches(msg, m.keys.Help):
-			m.showHelp = false
-			return m, m.tiQuery.Focus()
-		}
+	if cur, ok := m.navCursor(msg, m.cursor, len(m.filtered)); ok {
+		m.cursor = cur
 		return m, nil
 	}
-
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -152,17 +212,9 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.inTmux {
 			m.loadingText = "Opening…"
 			m.inputMode = modeLoading
-			return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root), m.spin.Tick)
+			return m, tea.Batch(cmdRunSelection(c.AbsPath, c.Root, c.Session), m.spin.Tick)
 		}
 		return m, tea.Quit
-	case key.Matches(msg, m.keys.Up):
-		m.cursor = moveCursor(m.cursor, m.visualStep(-1), len(m.filtered))
-	case key.Matches(msg, m.keys.Down):
-		m.cursor = moveCursor(m.cursor, m.visualStep(1), len(m.filtered))
-	case key.Matches(msg, m.keys.PageUp):
-		m.cursor = pageCursor(m.cursor, m.pageStep(-1), len(m.filtered))
-	case key.Matches(msg, m.keys.PageDown):
-		m.cursor = pageCursor(m.cursor, m.pageStep(1), len(m.filtered))
 	case key.Matches(msg, m.keys.NextFilter):
 		m.cycleFilter(1)
 	case key.Matches(msg, m.keys.PrevFilter):
@@ -178,6 +230,8 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.inputMode = modeURLInput
 		m.clone.tiURL.SetValue("")
 		return m, m.clone.tiURL.Focus()
+	case key.Matches(msg, m.keys.NewProject):
+		return m, m.openNewProject()
 	case key.Matches(msg, m.keys.NewTmp):
 		m.tiQuery.Blur()
 		m.tmp.tiName.SetValue("")
@@ -193,7 +247,7 @@ func (m model) updateNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.clean.tiQuery.Focus()
 	case key.Matches(msg, m.keys.Help):
 		m.tiQuery.Blur()
-		m.showHelp = true
+		m.inputMode = modeHelp
 	default:
 		// View filters share their binding↔mode pairs with the status bar tabs.
 		for _, t := range m.filterTabList() {
@@ -254,6 +308,8 @@ func (m model) updateError(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.clone.tiURL.Focus()
 	case modeNameInput:
 		return m, m.tmp.tiName.Focus()
+	case modeNewProjName:
+		return m, m.newProj.tiName.Focus()
 	default:
 		return m, m.tiQuery.Focus()
 	}

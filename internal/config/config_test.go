@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -17,8 +19,8 @@ func TestExpandHome(t *testing.T) {
 		{"relative/path", "/home/user", "relative/path"},
 	}
 	for _, tt := range tests {
-		if got := expandHome(tt.path, tt.home); got != tt.want {
-			t.Errorf("expandHome(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
+		if got := ExpandHome(tt.path, tt.home); got != tt.want {
+			t.Errorf("ExpandHome(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
 		}
 	}
 }
@@ -240,5 +242,109 @@ func TestLoad_keymapOverride(t *testing.T) {
 	}
 	if got := cfg.Keymap["help"]; len(got) != 1 || got[0] != "h" {
 		t.Errorf("Keymap[help] = %v, want [h]", got)
+	}
+}
+
+func TestLoad_cloneShorthand(t *testing.T) {
+	tests := []struct {
+		name, content, want string
+	}{
+		{"absent keeps default", "layout: top\n", "https://github.com/{repo}.git"},
+		{"empty turns it off", "clone_shorthand: \"\"\n", ""},
+		{"override", "clone_shorthand: \"git@github.com:{repo}.git\"\n", "git@github.com:{repo}.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgDir := filepath.Join(dir, "thop")
+			if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(dir, t.TempDir(), t.TempDir())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.CloneShorthand != tt.want {
+				t.Errorf("CloneShorthand = %q, want %q", cfg.CloneShorthand, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		content *string // nil: file does not exist
+		want    []string
+		keeps   string // substring that must survive
+	}{
+		{"missing file", nil, []string{"/r/projects"}, ""},
+		{"example config", new(exampleConfig), []string{"/r/projects"}, "# layout: \"bottom\""},
+		{"empty flow list", new("layout: bottom\npaths: []\n"), []string{"/r/projects"}, "layout: bottom"},
+		{"bare key with comment", new("paths: # roots\ntmp_path: /t\n"), []string{"/r/projects"}, "tmp_path: /t"},
+		{"no paths key", new("layout: bottom"), []string{"/r/projects"}, "layout: bottom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			file := configFile(dir)
+			if tt.content != nil {
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte(*tt.content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := AddPath(file, "/r/projects"); err != nil {
+				t.Fatalf("AddPath: %v", err)
+			}
+			cfg, err := Load(dir, t.TempDir(), "/home/u")
+			if err != nil {
+				t.Fatalf("Load after AddPath: %v", err)
+			}
+			if !slices.Equal(cfg.Paths, tt.want) {
+				t.Errorf("Paths = %v, want %v", cfg.Paths, tt.want)
+			}
+			data, _ := os.ReadFile(file)
+			if !strings.Contains(string(data), tt.keeps) {
+				t.Errorf("lost %q from:\n%s", tt.keeps, data)
+			}
+		})
+	}
+
+	t.Run("tilde path expands on load", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := AddPath(configFile(dir), "~/projects"); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(dir, t.TempDir(), "/home/u")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(cfg.Paths, []string{"/home/u/projects"}) {
+			t.Errorf("Paths = %v, want [/home/u/projects]", cfg.Paths)
+		}
+	})
+}
+
+func TestAddPath_existingEntries(t *testing.T) {
+	dir := t.TempDir()
+	file := configFile(dir)
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := "paths: ~\n"
+	if err := os.WriteFile(file, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddPath(file, "/r/projects"); err == nil {
+		t.Error("expected an error rather than a second paths key")
+	}
+	if data, _ := os.ReadFile(file); string(data) != before {
+		t.Errorf("file changed:\n%s", data)
 	}
 }

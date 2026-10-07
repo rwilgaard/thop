@@ -86,6 +86,9 @@ func bracketKey(s string) string { return "<" + s + ">" }
 func (st styles) keyHints(pairs [][2]string) string {
 	var parts []string
 	for _, p := range pairs {
+		if p[0] == "" { // action is unbound
+			continue
+		}
 		key := st.prompt.Render(bracketKey(p[0]))
 		action := st.sep.Render(p[1])
 		parts = append(parts, key+" "+action)
@@ -93,7 +96,21 @@ func (st styles) keyHints(pairs [][2]string) string {
 	return strings.Join(parts, "  ")
 }
 
-func inputRow(label, mid, hints string, width int) string {
-	pad := max(1, width-2-lipgloss.Width(label)-lipgloss.Width(mid)-lipgloss.Width(hints))
+// inputRow renders label, input and as many hints as fit width; hints are in
+// priority order and dropped from the end.
+func (st styles) inputRow(label, mid string, pairs [][2]string, width int) string {
+	avail := width - 2 - lipgloss.Width(label) - lipgloss.Width(mid)
+	hints := ""
+	for _, p := range pairs {
+		next := st.keyHints([][2]string{p})
+		if hints != "" {
+			next = hints + "  " + next
+		}
+		if lipgloss.Width(next) >= avail {
+			break
+		}
+		hints = next
+	}
+	pad := max(1, avail-lipgloss.Width(hints))
 	return leftPad + label + mid + strings.Repeat(" ", pad) + hints
 }

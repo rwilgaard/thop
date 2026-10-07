@@ -58,3 +58,43 @@ func TestClone_conflictDetection(t *testing.T) {
 		t.Error("expected error cloning into non-empty dir, got nil")
 	}
 }
+
+func TestExpandShorthand(t *testing.T) {
+	const https = "https://github.com/{repo}.git"
+	tests := []struct {
+		name, in, tmpl, want string
+	}{
+		{"shorthand", "rwilgaard/thop", https, "https://github.com/rwilgaard/thop.git"},
+		{"shorthand with .git", "rwilgaard/thop.git", https, "https://github.com/rwilgaard/thop.git"},
+		{"dots and dashes", "my-org/kustomize-sync.nvim", https, "https://github.com/my-org/kustomize-sync.nvim.git"},
+		{"ssh template", "rwilgaard/thop", "git@github.com:{repo}.git", "git@github.com:rwilgaard/thop.git"},
+		{"https url untouched", "https://gitlab.com/a/b.git", https, "https://gitlab.com/a/b.git"},
+		{"ssh url untouched", "git@github.com:a/b.git", https, "git@github.com:a/b.git"},
+		{"relative path untouched", "./a/b", https, "./a/b"},
+		{"three segments untouched", "a/b/c", https, "a/b/c"},
+		{"bare name untouched", "thop", https, "thop"},
+		{"empty template", "rwilgaard/thop", "", "rwilgaard/thop"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExpandShorthand(tt.in, tt.tmpl); got != tt.want {
+				t.Errorf("ExpandShorthand(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpandShorthand_localPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "vendor", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	const tmpl = "https://github.com/{repo}.git"
+	if got := ExpandShorthand("vendor/lib", tmpl); got != "vendor/lib" {
+		t.Errorf("existing local path was expanded to %q", got)
+	}
+	if got := ExpandShorthand("vendor/other", tmpl); got != "https://github.com/vendor/other.git" {
+		t.Errorf("ExpandShorthand = %q, want the expanded URL", got)
+	}
+}

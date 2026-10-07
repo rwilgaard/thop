@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type listRow struct {
@@ -50,6 +51,25 @@ func emptyMsg(query string, pool int) string {
 	return "No matches"
 }
 
+func (m model) missingLine(width int) string {
+	names := make([]string, len(m.missing))
+	for i, p := range m.missing {
+		names[i] = tilde(p)
+	}
+	msg := m.st.icons.Warning + " Not found: " + strings.Join(names, ", ")
+	if m.configFile != "" {
+		msg += " — check " + m.configFile
+	}
+	return leftPad + m.st.dimActive.Render(ansi.Truncate(msg, width-2, "…"))
+}
+
+func (m model) emptyMsg() string {
+	if len(m.paths) == 0 && m.configFile != "" && m.tiQuery.Value() == "" && m.view == viewAll {
+		return "No project roots. Add paths in " + m.configFile
+	}
+	return emptyMsg(m.tiQuery.Value(), len(m.all))
+}
+
 // nonRepoCount returns the count of non-repo items in the slice.
 func nonRepoCount(items []baseItem) int {
 	count := 0
@@ -68,7 +88,7 @@ func (st styles) renderRows(rows []listRow, o listOpts) []string {
 		if o.emptyMsg == "" {
 			return nil
 		}
-		return []string{leftPad + st.sep.Render(o.emptyMsg)}
+		return []string{leftPad + st.sep.Render(ansi.Truncate(o.emptyMsg, o.width-2, "…"))}
 	}
 	start, end := scrollWindow(o.cursor, o.maxRows, len(rows))
 	out := make([]string, 0, end-start)
@@ -193,9 +213,20 @@ func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 		rightW = lipgloss.Width(label)
 	}
 	fixedW := 1 + lipgloss.Width(glyph) + 1
-	text, matches := truncateName(c.RelPath, row.matches, o.width-1-fixedW-1-rightW)
+	nameW := o.width - 1 - fixedW - 1 - rightW
+	text, matches := truncateName(c.RelPath, row.matches, nameW)
 	name := renderName(text, matches, nameStyle, matchStyle)
 	contentW := fixedW + lipgloss.Width(text)
+	// rows that look alike say which root they are in, space permitting
+	if room := nameW - lipgloss.Width(text) - 2; c.Collides && room >= 4 {
+		root := ansi.Truncate(tilde(c.Root), room, "…")
+		rootStyle := st.sep
+		if isCursor {
+			rootStyle = st.selected.Bold(false).Faint(true)
+		}
+		name += sp + sp + rootStyle.Render(root)
+		contentW += 2 + lipgloss.Width(root)
+	}
 	pad := max(1, o.width-1-contentW-rightW)
 	padStr := strings.Repeat(" ", pad)
 	if isCursor {
@@ -217,7 +248,9 @@ func joinCols(cols []string, gap string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-func (st styles) renderHelpOverlay(width int, groups []helpGroup) string {
+// helpColumns lays the help groups out in the widest arrangement that fits
+// limit: three columns, two (first group beside the rest), or stacked.
+func (st styles) helpColumns(limit int, groups []helpGroup) string {
 	cols := make([]string, 0, len(groups))
 	for _, g := range groups {
 		maxKey := 0
@@ -233,14 +266,19 @@ func (st styles) renderHelpOverlay(width int, groups []helpGroup) string {
 		cols = append(cols, strings.Join(lines, "\n"))
 	}
 
-	limit := max(0, width-1)
-	if joined := joinCols(cols, "    "); lipgloss.Width(joined) <= limit {
-		return joined
+	stacked := func(c []string) string { return strings.Join(c, "\n\n") }
+	if l := joinCols(cols, "    "); lipgloss.Width(l) <= limit {
+		return l
 	}
-	if joined := joinCols(cols, "  "); lipgloss.Width(joined) <= limit {
-		return joined
+	if l := joinCols(cols, "  "); lipgloss.Width(l) <= limit {
+		return l
 	}
-	return strings.Join(cols, "\n\n")
+	if len(cols) > 2 {
+		if l := joinCols([]string{cols[0], stacked(cols[1:])}, "  "); lipgloss.Width(l) <= limit {
+			return l
+		}
+	}
+	return stacked(cols)
 }
 
 func (m model) searchLine(width int) string {
@@ -249,44 +287,46 @@ func (m model) searchLine(width int) string {
 	case modeLoading:
 		return leftPad + m.spin.View() + " " + m.st.sep.Render(m.loadingText)
 	case modeCleanTmp:
-		hints := m.st.keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
-		return inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(), hints, width)
+		return m.st.inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(),
+			[][2]string{{"enter", "Delete"}, {"space", "Select"}, {"esc", "Cancel"}}, width)
 	case modeDestPicker:
-		hints := m.st.keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
-		return inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(), hints, width)
+		return m.st.inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(),
+			[][2]string{{"enter", "Select"}, {"esc", "Back"}}, width)
+	case modeNewProjRoot:
+		return m.st.inputRow(m.st.prompt.Render("New project › Root "+prompt+" "), m.newProj.tiRoot.View(),
+			[][2]string{{"enter", "Select"}, {"esc", "Back"}}, width)
 	default:
-		label := m.st.prompt.Render(prompt + " ")
-		tiView := m.tiQuery.View()
-		if m.showHelp {
-			return leftPad + label + tiView
-		}
-		hints := m.st.keyHints([][2]string{
+		hints := [][2]string{
 			{m.keys.Enter.Help().Key, "Open"},
-			{m.keys.Clone.Help().Key, "Clone"},
 			{m.keys.Help.Help().Key, "Help"},
-		})
-		return inputRow(label, tiView, hints, width)
+			{m.keys.NextFilter.Help().Key, "Filter"},
+		}
+		if m.cursor < len(m.filtered) && m.filtered[m.cursor].base.active {
+			hints = append(hints, [2]string{m.keys.Close.Help().Key, "Close"})
+		}
+		hints = append(hints, [2]string{m.keys.Clone.Help().Key, "Clone"})
+		return m.st.inputRow(m.st.prompt.Render(prompt+" "), m.tiQuery.View(), hints, width)
 	}
 }
 
 func (m model) bodyLines(width, maxRows int) []string {
-	switch {
-	case m.inputMode == modeLoading:
+	switch m.inputMode {
+	case modeLoading:
 		return nil
-	case m.showHelp:
-		var lines []string
-		for _, line := range strings.Split(m.st.renderHelpOverlay(width, buildHelpGroups(m.keys)), "\n") {
-			lines = append(lines, leftPad+line)
-		}
-		return lines
-	case m.inputMode == modeCleanTmp:
+	case modeCleanTmp:
 		return m.st.renderRows(toListRows(m.clean.filtered), listOpts{
 			cursor: m.clean.cursor, maxRows: maxRows, width: width,
 			selected: m.clean.selected, showActive: true,
 			emptyMsg: emptyMsg(m.clean.tiQuery.Value(), len(m.tmpItems())),
 			reversed: m.layoutBottom,
 		})
-	case m.inputMode == modeDestPicker:
+	case modeNewProjRoot:
+		return m.st.renderRows(toListRows(m.newProj.filtered), listOpts{
+			cursor: m.newProj.cursor, maxRows: maxRows, width: width,
+			emptyMsg: "No matches",
+			reversed: m.layoutBottom,
+		})
+	case modeDestPicker:
 		return m.st.renderRows(toListRows(m.clone.destFiltered), listOpts{
 			cursor: m.clone.destCursor, maxRows: maxRows, width: width,
 			emptyMsg: emptyMsg(m.clone.tiDest.Value(), nonRepoCount(m.all)),
@@ -296,7 +336,7 @@ func (m model) bodyLines(width, maxRows int) []string {
 		return m.st.renderRows(toListRows(m.filtered), listOpts{
 			cursor: m.cursor, maxRows: maxRows, width: width,
 			showActive: true,
-			emptyMsg:   emptyMsg(m.tiQuery.Value(), len(m.all)),
+			emptyMsg:   m.emptyMsg(),
 			reversed:   m.layoutBottom,
 		})
 	}
@@ -310,11 +350,11 @@ func (m model) View() tea.View {
 	if width == 0 {
 		width = 80
 	}
-	maxRows := m.maxRows()
-	frame := m.frame(width, maxRows)
-	boxW := dialogWidth(width)
-	if d, ok := m.dialog(boxW-4, maxRows-1); ok {
-		frame = overlay(frame, m.st.renderDialog(d, boxW), width, maxRows+4)
+	frame := m.frame(width, m.maxRows())
+	height := lipgloss.Height(frame)
+	// dialog chrome: two borders, a blank line and up to two hint rows
+	if d, ok := m.dialog(width, height-5); ok {
+		frame = overlay(frame, m.st.renderDialog(d), width, height)
 	}
 	return tea.NewView(frame)
 }
@@ -326,6 +366,14 @@ func (m model) frame(width, maxRows int) string {
 	bg.inputMode = m.backdropMode()
 	search := clampWidth(bg.searchLine(width), width)
 	body := fillRows(bg.bodyLines(width, maxRows), maxRows, m.layoutBottom)
+	if len(m.missing) > 0 {
+		// far edge from the search bar, so it never sits between it and the best match
+		if m.layoutBottom {
+			body = append([]string{m.missingLine(width)}, body...)
+		} else {
+			body = append(body, m.missingLine(width))
+		}
+	}
 	if bg.inputMode != m.inputMode {
 		search = m.st.dim(search)
 		for i, l := range body {
@@ -415,10 +463,17 @@ func (m model) statusBar(width int) string {
 	case modeCleanTmp, modeConfirmClean:
 		left = m.st.modePill("Clean") + "  " + m.st.sep.Render(fmt.Sprintf("%d selected", len(m.clean.selected)))
 		right = m.st.sep.Render(position(m.clean.cursor, len(m.clean.filtered)))
-	case modeURLInput, modeCloneName:
+	case modeURLInput, modeCloneName, modeCloning:
 		left = m.st.modePill("Clone")
 	case modeConfirmClose:
 		left = m.st.modePill("Close")
+	case modeSetup:
+		left = m.st.modePill("Setup")
+	case modeNewProjRoot:
+		left = m.st.modePill("New project")
+		right = m.st.sep.Render(position(m.newProj.cursor, len(m.newProj.filtered)))
+	case modeNewProjName:
+		left = m.st.modePill("New project")
 	case modeNameInput:
 		left = m.st.modePill("New tmp")
 	case modeLoading:

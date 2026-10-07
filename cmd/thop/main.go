@@ -59,8 +59,11 @@ func main() {
 	}
 	inTmux := os.Getenv("TMUX") != ""
 
-	if len(cfg.Paths) == 0 {
-		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
+	// No setup dialog over a config that failed to parse: it would look
+	// unconfigured and the dialog would edit the broken file.
+	var addRoot ui.AddRoot
+	if len(cfg.Paths) == 0 && cfgErr == nil {
+		addRoot = firstRun(cfg.File, home, cacheFile)
 	}
 
 	// Only the TUI paths use the keymap, so validate there (not for direct
@@ -69,6 +72,9 @@ func main() {
 	validateKeymap := func() {
 		if *popup {
 			return
+		}
+		if cfgErr != nil && len(cfg.Paths) == 0 {
+			fatalf("no paths loaded, fix %s", cfg.File)
 		}
 		if err := ui.ValidateKeymap(cfg); err != nil {
 			fatalf("config: %v", err)
@@ -84,10 +90,10 @@ func main() {
 		if runInPopupIfNeeded(inTmux, *popup, cfg) {
 			return
 		}
-		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux)
+		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux, addRoot)
 		return
 	case flag.Arg(0) == "tmp":
-		doTmp(cfg.TmpPath, flag.Arg(1), frecencyFile)
+		doTmp(cfg, flag.Arg(1), cacheFile, frecencyFile)
 		return
 	case flag.NArg() == 1:
 		arg, err := filepath.Abs(flag.Arg(0))
@@ -99,7 +105,7 @@ func main() {
 		if err := frecency.Record(frecencyFile, arg); err != nil {
 			fmt.Fprintln(os.Stderr, "frecency:", err)
 		}
-		if err := tmux.HandleSelection(arg, root); err != nil {
+		if err := tmux.HandleSelection(arg, root, sessionFor(arg, loadAll(cfg, cacheFile))); err != nil {
 			fatalf("%v", err)
 		}
 		return
@@ -111,18 +117,17 @@ func main() {
 	}
 
 	var (
-		static        []candidates.Candidate
-		tmpCands      []candidates.Candidate
+		all           []candidates.Candidate
 		tmuxState     tmux.State
 		scores        map[string]float64
 		candidatesErr error
 		frecencyErr   error
 		wg            sync.WaitGroup
 	)
-	wg.Add(4)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		static, candidatesErr = candidates.LoadCandidates(cfg.Paths, cacheFile)
+		all, candidatesErr = candidates.Load(cfg.Paths, cfg.TmpPath, cacheFile)
 	}()
 	go func() {
 		defer wg.Done()
@@ -131,10 +136,6 @@ func main() {
 	go func() {
 		defer wg.Done()
 		scores, frecencyErr = frecency.Load(frecencyFile)
-	}()
-	go func() {
-		defer wg.Done()
-		tmpCands = candidates.LoadTmp(cfg.TmpPath)
 	}()
 	wg.Wait()
 
@@ -145,7 +146,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
 	}
 
-	result, err := ui.Run(append(static, tmpCands...), scores, tmuxState, *switchOnly, cfg, inTmux)
+	result, err := ui.Run(all, scores, tmuxState, *switchOnly, cfg, inTmux, addRoot)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "thop:", err)
 		return
@@ -157,11 +158,11 @@ func main() {
 func openResult(result ui.Result, cfg config.Config, frecencyFile string, inTmux bool) {
 	switch {
 	case result.Clone != nil && result.Clone.Cloned != "":
-		handleOpen(result.Clone.Cloned, "", frecencyFile, inTmux)
+		handleOpen(result.Clone.Cloned, "", result.Clone.Session, frecencyFile, inTmux)
 	case result.Tmp != nil && result.Tmp.Path != "":
-		handleOpen(result.Tmp.Path, cfg.TmpPath, frecencyFile, inTmux)
+		handleOpen(result.Tmp.Path, cfg.TmpPath, result.Tmp.Session, frecencyFile, inTmux)
 	case result.Candidate.AbsPath != "":
-		handleOpen(result.Candidate.AbsPath, result.Candidate.Root, frecencyFile, inTmux)
+		handleOpen(result.Candidate.AbsPath, result.Candidate.Root, result.Candidate.Session, frecencyFile, inTmux)
 	}
 }
 
@@ -187,30 +188,73 @@ func runInPopupIfNeeded(inTmux, popup bool, cfg config.Config) bool {
 	return true
 }
 
-func handleOpen(path, root, frecencyFile string, inTmux bool) {
+func handleOpen(path, root, session, frecencyFile string, inTmux bool) {
 	if err := frecency.Record(frecencyFile, path); err != nil {
 		fmt.Fprintln(os.Stderr, "frecency:", err)
 	}
 	if !inTmux {
-		if err := tmux.HandleSelection(path, root); err != nil {
+		if err := tmux.HandleSelection(path, root, session); err != nil {
 			fatalf("%v", err)
 		}
 	}
 }
 
-func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool) {
-	static, err := candidates.LoadCandidates(cfg.Paths, cacheFile)
+func loadAll(cfg config.Config, cacheFile string) []candidates.Candidate {
+	all, err := candidates.Load(cfg.Paths, cfg.TmpPath, cacheFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", err)
 	}
-	result, err := ui.RunDestPicker(append(static, candidates.LoadTmp(cfg.TmpPath)...), cfg, inTmux, url)
+	return all
+}
+
+// sessionFor returns the session a directly-opened path belongs to: its own
+// if it is a known candidate, else its parent project's. Empty when unknown.
+func sessionFor(path string, cs []candidates.Candidate) string {
+	parent := filepath.Dir(path)
+	for _, c := range cs {
+		// a repo inside a project is a window, not a session of its own, so
+		// only a top-level parent lends its session
+		if c.AbsPath == path || (c.AbsPath == parent && !strings.Contains(c.RelPath, "/")) {
+			return c.Session
+		}
+	}
+	return ""
+}
+
+func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool, addRoot ui.AddRoot) {
+	result, err := ui.RunDestPicker(loadAll(cfg, cacheFile), cfg, inTmux, url, addRoot)
 	if err != nil {
 		fatalf("dest picker: %v", err)
 	}
 	openResult(result, cfg, frecencyFile, inTmux)
 }
 
-func doTmp(tmpPath, name, frecencyFile string) {
+// firstRun returns the save action of the setup dialog shown when no scan
+// roots are configured: it writes the root to the config file and scans it.
+func firstRun(file, home, cacheFile string) ui.AddRoot {
+	return func(input string) (string, []candidates.Candidate, error) {
+		input = strings.TrimSpace(input)
+		dir, err := filepath.Abs(config.ExpandHome(input, home))
+		if err != nil {
+			return "", nil, err
+		}
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			return "", nil, errors.New("not a directory")
+		}
+		entry := dir
+		if strings.HasPrefix(input, "~") {
+			entry = input
+		}
+		if err := config.AddPath(file, entry); err != nil {
+			return "", nil, err
+		}
+		cs, err := candidates.LoadCandidates([]string{dir}, cacheFile)
+		return dir, cs, err
+	}
+}
+
+func doTmp(cfg config.Config, name, cacheFile, frecencyFile string) {
+	tmpPath := cfg.TmpPath
 	if !candidates.ValidTmpName(name) {
 		fatalf("tmp name must not contain path separators or '..'")
 	}
@@ -224,7 +268,7 @@ func doTmp(tmpPath, name, frecencyFile string) {
 	if err := frecency.Record(frecencyFile, dest); err != nil {
 		fmt.Fprintln(os.Stderr, "frecency:", err)
 	}
-	if err := tmux.HandleSelection(dest, tmpPath); err != nil {
+	if err := tmux.HandleSelection(dest, tmpPath, sessionFor(dest, loadAll(cfg, cacheFile))); err != nil {
 		fatalf("%v", err)
 	}
 }

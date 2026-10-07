@@ -21,6 +21,57 @@ type Candidate struct {
 	RelPath string // relative to Root, used for display and session-name lookup
 	IsRepo  bool
 	IsTmp   bool
+
+	// Set by Resolve.
+	Session  string // tmux session c opens in
+	Collides bool   // RelPath alone doesn't tell c apart from another candidate
+}
+
+// Resolve assigns each candidate its tmux session name and flags the ones
+// that look alike. A session is named after its directory; when two
+// directories would get the same name, each gets "name@root" instead.
+func Resolve(cs []Candidate) []Candidate {
+	shown := map[string]int{}
+	named := map[string]int{}
+	for _, c := range cs {
+		shown[c.RelPath]++
+		if !nested(c) {
+			named[tmux.Sessionize(c.RelPath)]++
+		}
+	}
+	for i, c := range cs {
+		// a nested candidate shares its parent's root, so both get the same
+		// session name, and an ambiguous parent makes the child ambiguous too
+		top, _, _ := strings.Cut(c.RelPath, "/")
+		name := tmux.Sessionize(top)
+		if named[name] > 1 {
+			name += "@" + tmux.Sessionize(filepath.Base(c.Root))
+		}
+		cs[i].Session = name
+		cs[i].Collides = shown[c.RelPath] > 1 || shown[top] > 1
+	}
+	return cs
+}
+
+// Load returns every candidate, scanned and tmp, with sessions resolved.
+func Load(roots []string, tmpPath, cacheFile string) ([]Candidate, error) {
+	static, err := LoadCandidates(roots, cacheFile)
+	return Resolve(append(static, LoadTmp(tmpPath)...)), err
+}
+
+// MissingRoots returns the roots that are not directories on disk.
+func MissingRoots(roots []string) []string {
+	var missing []string
+	for _, r := range roots {
+		if fi, err := os.Stat(r); err != nil || !fi.IsDir() {
+			missing = append(missing, r)
+		}
+	}
+	return missing
+}
+
+func nested(c Candidate) bool {
+	return strings.Contains(c.RelPath, "/")
 }
 
 // LoadCandidates returns candidates from cache, rebuilding if stale.
@@ -193,10 +244,15 @@ func readCache(cacheFile string, roots []string) ([]Candidate, error) {
 
 // Target returns the tmux session c opens in; window is empty for flat candidates.
 func Target(c Candidate) (session, window string) {
-	if parent, _, nested := strings.Cut(c.RelPath, "/"); nested {
-		return tmux.Sessionize(parent), filepath.Base(c.AbsPath)
+	parent, _, isNested := strings.Cut(c.RelPath, "/")
+	session = c.Session
+	if session == "" {
+		session = tmux.Sessionize(parent)
 	}
-	return tmux.Sessionize(c.RelPath), ""
+	if isNested {
+		window = filepath.Base(c.AbsPath)
+	}
+	return session, window
 }
 
 // Active reports whether c corresponds to an open tmux session or window.
@@ -223,9 +279,16 @@ func Previous(c Candidate, ts tmux.State) bool {
 	return ts.Last != "" && window == "" && session == ts.Last
 }
 
+// ValidName reports whether s is safe as a project directory name.
+func ValidName(s string) bool {
+	return s != "" && s != "." && s == strings.TrimSpace(s) &&
+		!strings.Contains(s, "/") && !strings.Contains(s, "..")
+}
+
 // ValidTmpName reports whether s is safe as a tmp project directory name.
+// Empty is allowed: the name is then generated.
 func ValidTmpName(s string) bool {
-	return !strings.Contains(s, "/") && !strings.Contains(s, "..")
+	return s == "" || ValidName(s)
 }
 
 // AutoTmpName returns a timestamped fallback name for unnamed tmp projects.
@@ -244,13 +307,17 @@ func LoadTmp(tmpPath string) []Candidate {
 		if !e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		out = append(out, Candidate{
-			AbsPath: filepath.Join(tmpPath, name),
-			Root:    tmpPath,
-			RelPath: name,
-			IsTmp:   true,
-		})
+		out = append(out, Tmp(tmpPath, e.Name()))
 	}
 	return out
+}
+
+// Tmp returns the candidate for the tmp project name under tmpPath.
+func Tmp(tmpPath, name string) Candidate {
+	return Candidate{
+		AbsPath: filepath.Join(tmpPath, name),
+		Root:    tmpPath,
+		RelPath: name,
+		IsTmp:   true,
+	}
 }
