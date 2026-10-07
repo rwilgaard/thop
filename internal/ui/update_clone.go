@@ -55,7 +55,7 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.startClone(fullDest)
 		}
-		return m, tea.Quit
+		return m, nil
 	case key.Matches(msg, m.keys.Up):
 		m.clone.destCursor = moveCursor(m.clone.destCursor, m.visualStep(-1), len(m.clone.destFiltered))
 		return m, nil

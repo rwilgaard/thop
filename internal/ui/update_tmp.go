@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rwilgaard/thop/internal/candidates"
+	"github.com/rwilgaard/thop/internal/tmux"
 )
 
 func (m model) updateNameInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -67,7 +68,7 @@ func (m model) updateCleanTmp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case key.Matches(msg, m.keys.Enter):
-		if len(m.tmpItems()) > 0 {
+		if len(m.cleanTargets()) > 0 {
 			m.clean.tiQuery.Blur()
 			m.inputMode = modeConfirmClean
 		}
@@ -89,12 +90,9 @@ func (m model) updateConfirmClean(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = modeCleanTmp
 			return m, m.clean.tiQuery.Focus()
 		}
-		toDelete := m.clean.selected
-		if len(toDelete) == 0 {
-			toDelete = make(map[string]bool, len(m.clean.filtered))
-			for _, item := range m.clean.filtered {
-				toDelete[item.base.candidate.AbsPath] = true
-			}
+		toDelete := make(map[string]bool)
+		for _, item := range m.cleanTargets() {
+			toDelete[item.candidate.AbsPath] = true
 		}
 		errMsgs := m.deleteTmp(toDelete)
 		m.clean.selected = make(map[string]bool)
@@ -107,8 +105,25 @@ func (m model) updateConfirmClean(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// deleteTmp removes the given tmp dirs from disk and from m.all. Dirs that
-// fail to delete stay listed; their errors are returned.
+func (m model) cleanTargets() []baseItem {
+	if len(m.clean.selected) == 0 {
+		if m.clean.cursor >= len(m.clean.filtered) {
+			return nil
+		}
+		return []baseItem{m.clean.filtered[m.clean.cursor].base}
+	}
+	var out []baseItem
+	for _, item := range m.tmpItems() {
+		if m.clean.selected[item.candidate.AbsPath] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// deleteTmp removes the given tmp dirs from disk and from m.all, killing the
+// tmux session of any that are open. Dirs that fail to delete stay listed;
+// their errors are returned.
 func (m *model) deleteTmp(toDelete map[string]bool) []string {
 	var kept []baseItem
 	var errMsgs []string
@@ -118,6 +133,12 @@ func (m *model) deleteTmp(toDelete map[string]bool) []string {
 			if err := os.RemoveAll(c.AbsPath); err != nil {
 				kept = append(kept, item)
 				errMsgs = append(errMsgs, err.Error())
+				continue
+			}
+			if item.active {
+				if err := m.clean.kill(tmux.Sessionize(c.RelPath)); err != nil {
+					errMsgs = append(errMsgs, "kill session "+c.RelPath+": "+err.Error())
+				}
 			}
 			continue
 		}

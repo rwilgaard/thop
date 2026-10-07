@@ -191,14 +191,36 @@ func readCache(cacheFile string, roots []string) ([]Candidate, error) {
 	return out, sc.Err()
 }
 
+// target returns the tmux session c opens in; window is empty for flat candidates.
+func target(c Candidate) (session, window string) {
+	if parent, _, nested := strings.Cut(c.RelPath, "/"); nested {
+		return tmux.Sessionize(parent), filepath.Base(c.AbsPath)
+	}
+	return tmux.Sessionize(c.RelPath), ""
+}
+
 // Active reports whether c corresponds to an open tmux session or window.
 func Active(c Candidate, ts tmux.State) bool {
-	if strings.Contains(c.RelPath, "/") {
-		parent := tmux.Sessionize(strings.SplitN(c.RelPath, "/", 2)[0])
-		window := filepath.Base(c.AbsPath)
-		return ts.Windows[parent+"/"+window]
+	session, window := target(c)
+	if window != "" {
+		return ts.Windows[session+"/"+window]
 	}
-	return ts.Sessions[tmux.Sessionize(c.RelPath)]
+	return ts.Sessions[session]
+}
+
+// Current reports whether opening c would land where the client already is.
+func Current(c Candidate, ts tmux.State) bool {
+	session, window := target(c)
+	if ts.Current == "" || session != ts.Current {
+		return false
+	}
+	return window == "" || window == ts.CurrentWindow
+}
+
+// Previous reports whether c is the session the client was in last.
+func Previous(c Candidate, ts tmux.State) bool {
+	session, window := target(c)
+	return ts.Last != "" && window == "" && session == ts.Last
 }
 
 // ValidTmpName reports whether s is safe as a tmp project directory name.

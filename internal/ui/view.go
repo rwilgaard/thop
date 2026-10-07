@@ -132,6 +132,28 @@ func renderName(name string, matches []int, base, match lipgloss.Style) string {
 	return sb.String()
 }
 
+func truncateName(name string, matches []int, maxW int) (string, []int) {
+	if lipgloss.Width(name) <= maxW {
+		return name, matches
+	}
+	cut, w := 0, 0
+	for i, r := range name {
+		rw := lipgloss.Width(string(r))
+		if w+rw > maxW-1 {
+			break
+		}
+		w += rw
+		cut = i + len(string(r))
+	}
+	kept := make([]int, 0, len(matches))
+	for _, i := range matches {
+		if i < cut {
+			kept = append(kept, i)
+		}
+	}
+	return name[:cut] + "…", kept
+}
+
 func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 	c := row.item.candidate
 	glyph, glyphColor := iconFor(c, st.icons)
@@ -159,20 +181,24 @@ func (st styles) renderRow(row listRow, isCursor bool, o listOpts) string {
 	if isCursor {
 		matchStyle = matchStyle.Background(st.selected.GetBackground())
 	}
-	name := renderName(c.RelPath, row.matches, nameStyle, matchStyle)
-
-	showActive := o.showActive && row.item.active
 	rightW := 0
 	var right string
-	if showActive {
-		if isCursor {
-			right = st.selectedActive.Render(st.activeLabel)
-		} else {
-			right = st.dimActive.Render(st.activeLabel)
+	if o.showActive && row.item.active {
+		label := st.activeLabel
+		if row.item.current {
+			label = st.currentLabel
 		}
-		rightW = lipgloss.Width(st.activeLabel)
+		if isCursor {
+			right = st.selectedActive.Render(label)
+		} else {
+			right = st.dimActive.Render(label)
+		}
+		rightW = lipgloss.Width(label)
 	}
-	contentW := 1 + lipgloss.Width(glyph) + 1 + lipgloss.Width(c.RelPath)
+	fixedW := 1 + lipgloss.Width(glyph) + 1
+	text, matches := truncateName(c.RelPath, row.matches, o.width-1-fixedW-1-rightW)
+	name := renderName(text, matches, nameStyle, matchStyle)
+	contentW := fixedW + lipgloss.Width(text)
 	pad := max(1, o.width-1-contentW-rightW)
 	padStr := strings.Repeat(" ", pad)
 	if isCursor {
@@ -248,16 +274,23 @@ func (m model) searchLine(width int) string {
 		hints := m.st.keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
 		return inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(), hints, width)
 	case modeConfirmClean:
-		n := len(m.clean.selected)
-		if n == 0 {
-			n = len(m.clean.filtered)
+		targets := m.cleanTargets()
+		n, open := len(targets), 0
+		for _, item := range targets {
+			if item.active {
+				open++
+			}
 		}
 		noun := "projects"
 		if n == 1 {
 			noun = "project"
 		}
+		q := fmt.Sprintf("Delete %d tmp %s?", n, noun)
+		if open > 0 {
+			q = fmt.Sprintf("Delete %d tmp %s (%d open)?", n, noun, open)
+		}
 		yn := m.st.sep.Render(" [y/N]")
-		return leftPad + m.st.prompt.Render(fmt.Sprintf("Delete %d tmp %s?", n, noun)) + yn
+		return leftPad + m.st.prompt.Render(q) + yn
 	case modeDestPicker:
 		hints := m.st.keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
 		return inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(), hints, width)
@@ -305,26 +338,22 @@ func (m model) bodyLines(width, maxRows int) []string {
 	case m.inputMode == modeCleanTmp:
 		return m.st.renderRows(toListRows(m.clean.filtered), listOpts{
 			cursor: m.clean.cursor, maxRows: maxRows, width: width,
-			selected: m.clean.selected,
+			selected: m.clean.selected, showActive: true,
 			emptyMsg: emptyMsg(m.clean.tiQuery.Value(), len(m.tmpItems())),
 			reversed: m.layoutBottom,
 		})
 	case m.inputMode == modeConfirmClean:
-		var toDelete []baseItem
-		if len(m.clean.selected) > 0 {
-			for _, item := range m.tmpItems() {
-				if m.clean.selected[item.candidate.AbsPath] {
-					toDelete = append(toDelete, item)
-				}
-			}
-		} else {
-			for _, it := range m.clean.filtered {
-				toDelete = append(toDelete, it.base)
-			}
+		toDelete := m.cleanTargets()
+		shown := len(toDelete)
+		if shown > maxRows-1 {
+			shown = maxRows - 2
 		}
 		lines := []string{leftPad + m.st.sep.Render("Will delete:")}
-		for _, item := range toDelete {
-			lines = append(lines, m.st.renderRow(listRow{item: item}, false, listOpts{width: width}))
+		for _, item := range toDelete[:shown] {
+			lines = append(lines, m.st.renderRow(listRow{item: item}, false, listOpts{width: width, showActive: true}))
+		}
+		if more := len(toDelete) - shown; more > 0 {
+			lines = append(lines, leftPad+m.st.sep.Render(fmt.Sprintf("… and %d more", more)))
 		}
 		return lines
 	case m.inputMode == modeDestPicker:
