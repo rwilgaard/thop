@@ -78,6 +78,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCloning(msg)
 		case modeHelp:
 			return m.updateHelp(msg)
+		case modeSetup:
+			return m.updateSetup(msg)
 		case modeLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -129,6 +131,12 @@ func (m model) forwardInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.clean.tiQuery.Value() != prev {
 			m.clean.cursor = 0
 			m.rebuildCleanFiltered()
+		}
+	case modeSetup:
+		prev := m.setup.tiPath.Value()
+		m.setup.tiPath, cmd = m.setup.tiPath.Update(msg)
+		if m.setup.tiPath.Value() != prev {
+			m.setup.err = ""
 		}
 	case modeConfirmClean, modeConfirmClose, modeLoading, modeCloning, modeHelp, modeError:
 	}

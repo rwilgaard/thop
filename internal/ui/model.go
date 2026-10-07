@@ -38,6 +38,7 @@ const (
 	modeLoading
 	modeCloning // git clone running; esc cancels
 	modeHelp
+	modeSetup // first run: no scan roots configured
 	modeError
 )
 
@@ -112,6 +113,21 @@ type cleanFlow struct {
 	selected map[string]bool // AbsPath of selected tmp candidates
 }
 
+// Setup enables the first-run dialog shown when no scan roots are configured.
+type Setup struct {
+	File string // config file, as shown to the user
+	// Add saves path as a scan root and returns its candidates.
+	Add func(path string) ([]candidates.Candidate, error)
+}
+
+// setupFlow holds first-run state.
+type setupFlow struct {
+	tiPath textinput.Model
+	file   string
+	add    func(path string) ([]candidates.Candidate, error)
+	err    string
+}
+
 type model struct {
 	all       []baseItem
 	normFrec  map[string]float64
@@ -128,6 +144,7 @@ type model struct {
 	clone cloneFlow
 	tmp   tmpFlow
 	clean cleanFlow
+	setup setupFlow
 
 	closeTarget baseItem
 	ts          tmux.State
@@ -306,14 +323,25 @@ func runProgram(m model) (Result, error) {
 	return Result{}, nil
 }
 
-func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool) (Result, error) {
-	return runProgram(newModel(cs, scores, ts, switchOnly, cfg, inTmux))
+// Run shows the picker. A non-nil setup opens the first-run dialog first.
+func Run(cs []candidates.Candidate, scores map[string]float64, ts tmux.State, switchOnly bool, cfg config.Config, inTmux bool, setup *Setup) (Result, error) {
+	m := newModel(cs, scores, ts, switchOnly, cfg, inTmux)
+	if setup != nil {
+		_ = m.openSetup(*setup)
+	}
+	return runProgram(m)
 }
 
-func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string) (Result, error) {
+// RunDestPicker shows the clone destination picker for cloneURL. A non-nil
+// setup opens the first-run dialog first.
+func RunDestPicker(cs []candidates.Candidate, cfg config.Config, inTmux bool, cloneURL string, setup *Setup) (Result, error) {
 	m := newModel(cs, map[string]float64{}, tmux.State{}, false, cfg, inTmux)
 	m.tiQuery.Blur()
 	m.clone.tiURL.SetValue(cloneURL)
-	_ = m.openDestPicker()
+	if setup != nil {
+		_ = m.openSetup(*setup)
+	} else {
+		_ = m.openDestPicker()
+	}
 	return runProgram(m)
 }

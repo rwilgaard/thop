@@ -50,6 +50,13 @@ func emptyMsg(query string, pool int) string {
 	return "No matches"
 }
 
+func (m model) emptyMsg() string {
+	if m.setup.file != "" && m.tiQuery.Value() == "" && m.view == viewAll {
+		return "No project roots. Add paths in " + m.setup.file
+	}
+	return emptyMsg(m.tiQuery.Value(), len(m.all))
+}
+
 // nonRepoCount returns the count of non-repo items in the slice.
 func nonRepoCount(items []baseItem) int {
 	count := 0
@@ -68,7 +75,8 @@ func (st styles) renderRows(rows []listRow, o listOpts) []string {
 		if o.emptyMsg == "" {
 			return nil
 		}
-		return []string{leftPad + st.sep.Render(o.emptyMsg)}
+		msg, _ := truncateName(o.emptyMsg, nil, o.width-2)
+		return []string{leftPad + st.sep.Render(msg)}
 	}
 	start, end := scrollWindow(o.cursor, o.maxRows, len(rows))
 	out := make([]string, 0, end-start)
@@ -296,7 +304,7 @@ func (m model) bodyLines(width, maxRows int) []string {
 		return m.st.renderRows(toListRows(m.filtered), listOpts{
 			cursor: m.cursor, maxRows: maxRows, width: width,
 			showActive: true,
-			emptyMsg:   emptyMsg(m.tiQuery.Value(), len(m.all)),
+			emptyMsg:   m.emptyMsg(),
 			reversed:   m.layoutBottom,
 		})
 	}
@@ -418,6 +426,8 @@ func (m model) statusBar(width int) string {
 		left = m.st.modePill("Clone")
 	case modeConfirmClose:
 		left = m.st.modePill("Close")
+	case modeSetup:
+		left = m.st.modePill("Setup")
 	case modeNameInput:
 		left = m.st.modePill("New tmp")
 	case modeLoading:

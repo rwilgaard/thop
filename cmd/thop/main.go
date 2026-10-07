@@ -59,8 +59,9 @@ func main() {
 	}
 	inTmux := os.Getenv("TMUX") != ""
 
+	var setup *ui.Setup
 	if len(cfg.Paths) == 0 {
-		fatalf("no paths configured — edit %s/thop/config.yaml", strings.TrimSuffix(xdgConfig, "/"))
+		setup = firstRun(config.File(xdgConfig), home, cacheFile)
 	}
 
 	// Only the TUI paths use the keymap, so validate there (not for direct
@@ -84,7 +85,7 @@ func main() {
 		if runInPopupIfNeeded(inTmux, *popup, cfg) {
 			return
 		}
-		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux)
+		doClone(flag.Arg(1), cfg, cacheFile, frecencyFile, inTmux, setup)
 		return
 	case flag.Arg(0) == "tmp":
 		doTmp(cfg.TmpPath, flag.Arg(1), frecencyFile)
@@ -145,7 +146,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "thop: frecency: %v\n", frecencyErr)
 	}
 
-	result, err := ui.Run(append(static, tmpCands...), scores, tmuxState, *switchOnly, cfg, inTmux)
+	result, err := ui.Run(append(static, tmpCands...), scores, tmuxState, *switchOnly, cfg, inTmux, setup)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "thop:", err)
 		return
@@ -198,16 +199,49 @@ func handleOpen(path, root, frecencyFile string, inTmux bool) {
 	}
 }
 
-func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool) {
+func doClone(url string, cfg config.Config, cacheFile, frecencyFile string, inTmux bool, setup *ui.Setup) {
 	static, err := candidates.LoadCandidates(cfg.Paths, cacheFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "thop: candidates: %v\n", err)
 	}
-	result, err := ui.RunDestPicker(append(static, candidates.LoadTmp(cfg.TmpPath)...), cfg, inTmux, url)
+	result, err := ui.RunDestPicker(append(static, candidates.LoadTmp(cfg.TmpPath)...), cfg, inTmux, url, setup)
 	if err != nil {
 		fatalf("dest picker: %v", err)
 	}
 	openResult(result, cfg, frecencyFile, inTmux)
+}
+
+// firstRun builds the setup dialog shown when no scan roots are configured:
+// saving writes the root to the config file and scans it.
+func firstRun(file, home, cacheFile string) *ui.Setup {
+	return &ui.Setup{
+		File: tildePath(file, home),
+		Add: func(input string) ([]candidates.Candidate, error) {
+			input = strings.TrimSpace(input)
+			dir, err := filepath.Abs(config.ExpandHome(input, home))
+			if err != nil {
+				return nil, err
+			}
+			if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+				return nil, errors.New("not a directory")
+			}
+			entry := dir
+			if strings.HasPrefix(input, "~") {
+				entry = input
+			}
+			if err := config.AddPath(file, entry); err != nil {
+				return nil, err
+			}
+			return candidates.LoadCandidates([]string{dir}, cacheFile)
+		},
+	}
+}
+
+func tildePath(path, home string) string {
+	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+		return "~/" + rest
+	}
+	return path
 }
 
 func doTmp(tmpPath, name, frecencyFile string) {

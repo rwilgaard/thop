@@ -70,7 +70,7 @@ The status bar shows the filters (`All • Projects • Repos • Tmp • Open`)
 
 ## Configuration
 
-First run creates `~/.config/thop/config.yaml`. Add your project roots:
+First run creates `~/.config/thop/config.yaml` and asks for a project root, which it saves there. Add more roots in the file:
 
 ```yaml
 paths:

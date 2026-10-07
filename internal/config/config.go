@@ -2,11 +2,15 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rwilgaard/thop/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -157,17 +161,49 @@ paths:
 #   separator: "-" # horizontal rule rune
 `
 
+// File returns the config file path under xdgConfig.
+func File(xdgConfig string) string {
+	return filepath.Join(xdgConfig, "thop", "config.yaml")
+}
+
+var emptyPathsRe = regexp.MustCompile(`(?m)^paths:[ \t]*(\[[ \t]*\])?[ \t]*(#.*)?$`)
+
+// AddPath adds path as a scan root in the config file, keeping the rest of
+// the file (comments included) as it is. It expects a file with no roots yet.
+func AddPath(file, path string) error {
+	data, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	entry := "paths:\n  - " + strconv.Quote(path)
+	content := string(data)
+	if loc := emptyPathsRe.FindStringIndex(content); loc != nil {
+		content = content[:loc[0]] + entry + content[loc[1]:]
+	} else {
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += entry + "\n"
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.Write(file, func(w io.Writer) error {
+		_, err := io.WriteString(w, content)
+		return err
+	})
+}
+
 // Load reads config.yaml, falling back to defaults. A non-nil error means the
 // file existed but could not be read or parsed — defaults are still returned,
 // so callers can warn and continue.
 func Load(xdgConfig, xdgCache, home string) (Config, error) {
 	tmpDefault := filepath.Join(xdgCache, "thop", "tmp")
 	cfg := defaultConfig()
-	dir := filepath.Join(xdgConfig, "thop")
-	path := filepath.Join(dir, "config.yaml")
+	path := File(xdgConfig)
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		_ = os.MkdirAll(dir, 0o755)
+		_ = os.MkdirAll(filepath.Dir(path), 0o755)
 		_ = os.WriteFile(path, []byte(exampleConfig), 0o644)
 		cfg.TmpPath = tmpDefault
 		return cfg, nil
@@ -182,12 +218,12 @@ func Load(xdgConfig, xdgCache, home string) (Config, error) {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i, p := range cfg.Paths {
-		cfg.Paths[i] = expandHome(p, home)
+		cfg.Paths[i] = ExpandHome(p, home)
 	}
 	if cfg.TmpPath == "" {
 		cfg.TmpPath = tmpDefault
 	} else {
-		cfg.TmpPath = expandHome(cfg.TmpPath, home)
+		cfg.TmpPath = ExpandHome(cfg.TmpPath, home)
 	}
 	// yaml.Unmarshal over defaults keeps defaults for absent keys, but an
 	// explicit empty scalar ("") overwrites them. Reapply every default so a
@@ -246,7 +282,7 @@ func orDefault(v, def string) string {
 	return v
 }
 
-func expandHome(path, home string) string {
+func ExpandHome(path, home string) string {
 	if path == "~" {
 		return home
 	}

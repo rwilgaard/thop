@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -17,8 +19,8 @@ func TestExpandHome(t *testing.T) {
 		{"relative/path", "/home/user", "relative/path"},
 	}
 	for _, tt := range tests {
-		if got := expandHome(tt.path, tt.home); got != tt.want {
-			t.Errorf("expandHome(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
+		if got := ExpandHome(tt.path, tt.home); got != tt.want {
+			t.Errorf("ExpandHome(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
 		}
 	}
 }
@@ -270,4 +272,61 @@ func TestLoad_cloneShorthand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAddPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		content *string // nil: file does not exist
+		want    []string
+		keeps   string // substring that must survive
+	}{
+		{"missing file", nil, []string{"/r/projects"}, ""},
+		{"example config", new(exampleConfig), []string{"/r/projects"}, "# layout: \"bottom\""},
+		{"empty flow list", new("layout: bottom\npaths: []\n"), []string{"/r/projects"}, "layout: bottom"},
+		{"bare key with comment", new("paths: # roots\ntmp_path: /t\n"), []string{"/r/projects"}, "tmp_path: /t"},
+		{"no paths key", new("layout: bottom"), []string{"/r/projects"}, "layout: bottom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			file := File(dir)
+			if tt.content != nil {
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte(*tt.content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := AddPath(file, "/r/projects"); err != nil {
+				t.Fatalf("AddPath: %v", err)
+			}
+			cfg, err := Load(dir, t.TempDir(), "/home/u")
+			if err != nil {
+				t.Fatalf("Load after AddPath: %v", err)
+			}
+			if !slices.Equal(cfg.Paths, tt.want) {
+				t.Errorf("Paths = %v, want %v", cfg.Paths, tt.want)
+			}
+			data, _ := os.ReadFile(file)
+			if !strings.Contains(string(data), tt.keeps) {
+				t.Errorf("lost %q from:\n%s", tt.keeps, data)
+			}
+		})
+	}
+
+	t.Run("tilde path expands on load", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := AddPath(File(dir), "~/projects"); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(dir, t.TempDir(), "/home/u")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(cfg.Paths, []string{"/home/u/projects"}) {
+			t.Errorf("Paths = %v, want [/home/u/projects]", cfg.Paths)
+		}
+	})
 }

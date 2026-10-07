@@ -39,7 +39,7 @@ func (m model) backdropMode() inputMode {
 		return modeDestPicker
 	case modeConfirmClean:
 		return modeCleanTmp
-	case modeConfirmClose, modeHelp:
+	case modeConfirmClose, modeHelp, modeSetup:
 		return modeNormal
 	case modeCloning:
 		return modeDestPicker
@@ -75,6 +75,16 @@ func (m model) dialogContent(frameW, maxLines int) (dialog, bool) {
 			title: "Clone repository",
 			lines: []string{input(m.clone.tiURL)},
 			hints: [][2]string{{"enter", "Next"}, {"esc", "Cancel"}},
+		}, true
+	case modeSetup:
+		lines := []string{m.st.sep.Render("thop lists the folders inside it."), input(m.setup.tiPath)}
+		if m.setup.err != "" {
+			lines = append(lines, m.st.sep.Render(m.setup.err))
+		}
+		return dialog{
+			title: "Add a project root",
+			lines: lines,
+			hints: [][2]string{{"enter", "Save"}, {"esc", "Skip"}},
 		}, true
 	case modeNameInput:
 		lines := []string{input(m.tmp.tiName)}
@@ -245,7 +255,8 @@ func (st styles) dim(line string) string {
 // horizontally past that.
 func (m *model) sizeDialogInputs() {
 	w := max(1, dialogWidth(m.width)-4-lipgloss.Width(m.st.icons.Prompt)-2)
-	for _, ti := range []*textinput.Model{&m.clone.tiURL, &m.clone.tiName, &m.tmp.tiName} {
+	for _, ti := range []*textinput.Model{&m.clone.tiURL, &m.clone.tiName, &m.tmp.tiName, &m.setup.tiPath} {
 		ti.SetWidth(w)
+		ti.SetCursor(ti.Position()) // recompute the visible window for the new width
 	}
 }
