@@ -12,6 +12,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
+		m.sizeDialogInputs()
 		return m, nil
 	case spinner.TickMsg:
 		if m.inputMode == modeLoading {

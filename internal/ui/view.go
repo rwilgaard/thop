@@ -2,15 +2,12 @@ package ui
 
 import (
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/rwilgaard/thop/internal/candidates"
-	"github.com/rwilgaard/thop/internal/git"
 )
 
 type listRow struct {
@@ -251,52 +248,12 @@ func (m model) searchLine(width int) string {
 	switch m.inputMode {
 	case modeLoading:
 		return leftPad + m.spin.View() + " " + m.st.sep.Render(m.loadingText)
-	case modeError:
-		hints := m.st.keyHints([][2]string{{"any key", "Dismiss"}, {"ctrl-c", "Quit"}})
-		label := m.st.sep.Render(m.st.icons.Warning + "  ")
-		return inputRow(label, strings.SplitN(m.errMsg, "\n", 2)[0], hints, width)
-	case modeURLInput:
-		hints := m.st.keyHints([][2]string{{"enter", "Clone"}, {"esc", "Cancel"}})
-		return inputRow(m.st.prompt.Render("Clone repository "+prompt+" "), m.clone.tiURL.View(), hints, width)
-	case modeNameInput:
-		hints := m.st.keyHints([][2]string{{"enter", "Create"}, {"esc", "Cancel"}})
-		label := m.st.prompt.Render("New tmp project " + prompt + " ")
-		tiView := m.tmp.tiName.View()
-		var hint string
-		switch {
-		case m.tmp.conflict && !candidates.ValidTmpName(m.tmp.tiName.Value()):
-			hint = m.st.sep.Render(" (Invalid name)")
-		case m.tmp.conflict:
-			hint = m.st.sep.Render(" (Already exists — enter opens it)")
-		}
-		return inputRow(label, tiView+hint, hints, width)
 	case modeCleanTmp:
 		hints := m.st.keyHints([][2]string{{"space", "Select"}, {"enter", "Delete"}, {"esc", "Cancel"}})
 		return inputRow(m.st.prompt.Render("Delete tmp projects "+prompt+" "), m.clean.tiQuery.View(), hints, width)
-	case modeConfirmClean:
-		targets := m.cleanTargets()
-		n, open := len(targets), 0
-		for _, item := range targets {
-			if item.active {
-				open++
-			}
-		}
-		noun := "projects"
-		if n == 1 {
-			noun = "project"
-		}
-		q := fmt.Sprintf("Delete %d tmp %s?", n, noun)
-		if open > 0 {
-			q = fmt.Sprintf("Delete %d tmp %s (%d open)?", n, noun, open)
-		}
-		yn := m.st.sep.Render(" [y/N]")
-		return leftPad + m.st.prompt.Render(q) + yn
 	case modeDestPicker:
 		hints := m.st.keyHints([][2]string{{"enter", "Select"}, {"esc", "Back"}})
 		return inputRow(m.st.prompt.Render("Clone › Destination "+prompt+" "), m.clone.tiDest.View(), hints, width)
-	case modeCloneName:
-		hints := m.st.keyHints([][2]string{{"enter", "Clone as"}, {"esc", "Back"}})
-		return inputRow(m.st.prompt.Render("Clone › Name conflict "+prompt+" "), m.clone.tiName.View(), hints, width)
 	default:
 		label := m.st.prompt.Render(prompt + " ")
 		tiView := m.tiQuery.View()
@@ -316,25 +273,12 @@ func (m model) bodyLines(width, maxRows int) []string {
 	switch {
 	case m.inputMode == modeLoading:
 		return nil
-	case m.inputMode == modeError:
-		parts := strings.SplitN(m.errMsg, "\n", 2)
-		if len(parts) < 2 {
-			return nil
-		}
-		var lines []string
-		for _, line := range strings.Split(parts[1], "\n") {
-			lines = append(lines, leftPad+m.st.sep.Render(line))
-		}
-		return lines
 	case m.showHelp:
 		var lines []string
 		for _, line := range strings.Split(m.st.renderHelpOverlay(width, buildHelpGroups(m.keys)), "\n") {
 			lines = append(lines, leftPad+line)
 		}
 		return lines
-	case m.inputMode == modeCloneName:
-		conflict := filepath.Join(m.clone.destDir, git.RepoNameFromURL(m.clone.tiURL.Value()))
-		return []string{leftPad + m.st.sep.Render(m.st.icons.Warning+" Already exists: "+conflict)}
 	case m.inputMode == modeCleanTmp:
 		return m.st.renderRows(toListRows(m.clean.filtered), listOpts{
 			cursor: m.clean.cursor, maxRows: maxRows, width: width,
@@ -342,20 +286,6 @@ func (m model) bodyLines(width, maxRows int) []string {
 			emptyMsg: emptyMsg(m.clean.tiQuery.Value(), len(m.tmpItems())),
 			reversed: m.layoutBottom,
 		})
-	case m.inputMode == modeConfirmClean:
-		toDelete := m.cleanTargets()
-		shown := len(toDelete)
-		if shown > maxRows-1 {
-			shown = maxRows - 2
-		}
-		lines := []string{leftPad + m.st.sep.Render("Will delete:")}
-		for _, item := range toDelete[:shown] {
-			lines = append(lines, m.st.renderRow(listRow{item: item}, false, listOpts{width: width, showActive: true}))
-		}
-		if more := len(toDelete) - shown; more > 0 {
-			lines = append(lines, leftPad+m.st.sep.Render(fmt.Sprintf("… and %d more", more)))
-		}
-		return lines
 	case m.inputMode == modeDestPicker:
 		return m.st.renderRows(toListRows(m.clone.destFiltered), listOpts{
 			cursor: m.clone.destCursor, maxRows: maxRows, width: width,
@@ -387,34 +317,37 @@ func (m model) View() tea.View {
 
 	// height budget: search + top-sep + bottom-sep + status = 4
 	maxRows := max(5, height-4)
-	body := fillRows(m.bodyLines(width, maxRows), maxRows, m.layoutBottom)
+	frame := m.frame(width, maxRows)
+	boxW := dialogWidth(width)
+	if d, ok := m.dialog(boxW-4, maxRows-1); ok {
+		frame = overlay(frame, m.st.renderDialog(d, boxW), width, maxRows+4)
+	}
+	return tea.NewView(frame)
+}
+
+// frame renders the search line, list and status bar. Behind a dialog the
+// search line and list are those of the backdrop mode, dimmed.
+func (m model) frame(width, maxRows int) string {
+	bg := m
+	bg.inputMode = m.backdropMode()
+	search := clampWidth(bg.searchLine(width), width)
+	body := fillRows(bg.bodyLines(width, maxRows), maxRows, m.layoutBottom)
+	if bg.inputMode != m.inputMode {
+		search = m.st.dim(search)
+		for i, l := range body {
+			body[i] = m.st.dim(l)
+		}
+	}
+	status := clampWidth(m.statusBar(width), width)
 	sepLine := leftPad + m.st.sep.Render(strings.Repeat(m.st.icons.Separator, max(0, width-2)))
 
-	var sb strings.Builder
-	writeLine := func(l string) {
-		sb.WriteString(l)
-		sb.WriteByte('\n')
-	}
+	first, last := search, status
 	if m.layoutBottom {
-		writeLine(clampWidth(m.statusBar(width), width))
-		writeLine(sepLine)
-		for _, l := range body {
-			writeLine(l)
-		}
-		writeLine(sepLine)
-		// no trailing newline: would scroll the terminal, shifting the frame
-		sb.WriteString(clampWidth(m.searchLine(width), width))
-	} else {
-		writeLine(clampWidth(m.searchLine(width), width))
-		writeLine(sepLine)
-		for _, l := range body {
-			writeLine(l)
-		}
-		writeLine(sepLine)
-		// no trailing newline: would scroll the terminal, shifting the frame
-		sb.WriteString(clampWidth(m.statusBar(width), width))
+		first, last = status, search
 	}
-	return tea.NewView(sb.String())
+	lines := append([]string{first, sepLine}, body...)
+	// no trailing newline: would scroll the terminal, shifting the frame
+	return strings.Join(append(lines, sepLine, last), "\n")
 }
 
 // modePill renders the current mode name as a filled badge for the status bar.
