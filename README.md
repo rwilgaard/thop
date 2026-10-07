@@ -23,6 +23,8 @@ Or build from source:
 make install
 ```
 
+Also available as a Nix package: [rwilgaard/nix-packages](https://github.com/rwilgaard/nix-packages).
+
 ## Usage
 
 ```sh
