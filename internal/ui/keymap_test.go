@@ -114,8 +114,11 @@ func TestCaretLabel(t *testing.T) {
 	if got := caretLabel(km.All); got != "^B" {
 		t.Errorf("caretLabel(All) = %q, want %q", got, "^B")
 	}
-	if got := caretLabel(km.Projects); got != "^P" {
-		t.Errorf("caretLabel(Projects) = %q, want %q", got, "^P")
+	if got := caretLabel(km.Projects); got != "" {
+		t.Errorf("caretLabel(Projects) = %q, want empty (unbound by default)", got)
+	}
+	if got := caretLabel(km.Close); got != "^Q" {
+		t.Errorf("caretLabel(Close) = %q, want %q", got, "^Q")
 	}
 	if got := caretLabel(km.Repos); got != "ctrl-shift-x" {
 		t.Errorf("caretLabel(Repos) = %q, want %q (caret form only for plain ctrl)", got, "ctrl-shift-x")

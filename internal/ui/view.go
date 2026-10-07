@@ -310,13 +310,7 @@ func (m model) View() tea.View {
 	if width == 0 {
 		width = 80
 	}
-	height := m.height
-	if height == 0 {
-		height = 24
-	}
-
-	// height budget: search + top-sep + bottom-sep + status = 4
-	maxRows := max(5, height-4)
+	maxRows := m.maxRows()
 	frame := m.frame(width, maxRows)
 	boxW := dialogWidth(width)
 	if d, ok := m.dialog(boxW-4, maxRows-1); ok {
@@ -378,6 +372,7 @@ func (m model) filterTabList() []filterTab {
 		{m.keys.Projects, "Projects", viewProject},
 		{m.keys.Repos, "Repos", viewRepo},
 		{m.keys.Tmp, "Tmp", viewTmp},
+		{m.keys.Open, "Open", viewOpen},
 	}
 }
 
@@ -389,8 +384,10 @@ func (m model) filterTabs(keyFn func(key.Binding) string, sep string) string {
 		if i > 0 {
 			sb.WriteString(sep)
 		}
-		sb.WriteString(m.st.prompt.Render(keyFn(t.binding)))
-		sb.WriteString(" ")
+		if len(t.binding.Keys()) > 0 {
+			sb.WriteString(m.st.prompt.Render(keyFn(t.binding)))
+			sb.WriteString(" ")
+		}
 		// Active filter is just colored text — no background pill. Bare labels
 		// keep active and inactive the same width, so nothing shifts on switch.
 		if m.view == t.mode {
@@ -402,17 +399,26 @@ func (m model) filterTabs(keyFn func(key.Binding) string, sep string) string {
 	return sb.String()
 }
 
+func position(cursor, n int) string {
+	if n == 0 {
+		return "0 items"
+	}
+	return fmt.Sprintf("%d/%d", cursor+1, n)
+}
+
 func (m model) statusBar(width int) string {
 	var left, right string
 	switch m.inputMode {
 	case modeDestPicker:
 		left = m.st.modePill("Clone") + "  " + m.st.sep.Render(m.clone.tiURL.Value())
-		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.clone.destFiltered)))
+		right = m.st.sep.Render(position(m.clone.destCursor, len(m.clone.destFiltered)))
 	case modeCleanTmp, modeConfirmClean:
 		left = m.st.modePill("Clean") + "  " + m.st.sep.Render(fmt.Sprintf("%d selected", len(m.clean.selected)))
-		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.clean.filtered)))
+		right = m.st.sep.Render(position(m.clean.cursor, len(m.clean.filtered)))
 	case modeURLInput, modeCloneName:
 		left = m.st.modePill("Clone")
+	case modeConfirmClose:
+		left = m.st.modePill("Close")
 	case modeNameInput:
 		left = m.st.modePill("New tmp")
 	case modeLoading:
@@ -420,7 +426,7 @@ func (m model) statusBar(width int) string {
 	case modeError:
 		left = m.st.modePill("Error")
 	default:
-		right = m.st.sep.Render(fmt.Sprintf("%d items", len(m.filtered)))
+		right = m.st.sep.Render(position(m.cursor, len(m.filtered)))
 		badge := m.st.modePill("Filter") + "  "
 		// Prefer spelled keys (<ctrl-a>) with bullet separators to match the
 		// other hint rows; fall back to compact carets (^A) when the row

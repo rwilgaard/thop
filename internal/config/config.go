@@ -116,10 +116,16 @@ paths:
 #   clone: ["ctrl+g"]
 #   newtmp: ["ctrl+n"]
 #   cleantmp: ["ctrl+x"]
-#   all: ["ctrl+a"]
-#   projects: ["ctrl+p"]
-#   repos: ["ctrl+r"]
-#   tmp: ["ctrl+t"]
+#   close: ["ctrl+q"]
+#   pageup: ["pgup", "ctrl+u"]
+#   pagedown: ["pgdown", "ctrl+d"]
+#   nextfilter: ["tab"]
+#   prevfilter: ["shift+tab"]
+#   all: []          # direct filter jumps, unbound by default
+#   projects: []
+#   repos: []
+#   tmp: []
+#   open: []
 
 # Override default UI colors.
 # Values can be terminal color numbers (0-255) or hex codes (#rrggbb).

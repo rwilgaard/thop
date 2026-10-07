@@ -32,7 +32,7 @@ func main() {
 	}
 
 	var (
-		switchOnly  = flag.Bool("s", false, "only show active sessions")
+		switchOnly  = flag.Bool("s", false, "start in the open-sessions filter")
 		popup       = flag.Bool("popup", false, "internal: already running inside tmux popup")
 		showVersion = flag.Bool("version", false, "print version and exit")
 	)

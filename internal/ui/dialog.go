@@ -37,6 +37,8 @@ func (m model) backdropMode() inputMode {
 		return modeDestPicker
 	case modeConfirmClean:
 		return modeCleanTmp
+	case modeConfirmClose:
+		return modeNormal
 	default:
 		return mode
 	}
@@ -109,6 +111,21 @@ func (m model) dialog(innerW, maxLines int) (dialog, bool) {
 			lines: lines,
 			hints: [][2]string{{"y", "Delete"}, {"any key", "Cancel"}},
 		}, true
+	case modeConfirmClose:
+		c := m.closeTarget.candidate
+		session, window := candidates.Target(c)
+		title := "Close session " + c.RelPath + "?"
+		if window != "" {
+			title = "Close window " + c.RelPath + "?"
+		} else if n := m.windowCount(session); n > 1 {
+			title = fmt.Sprintf("Close session %s (%d windows)?", c.RelPath, n)
+		}
+		row := m.st.renderRow(listRow{item: m.closeTarget}, false, listOpts{width: innerW + 2, showActive: true})
+		return dialog{
+			title: title,
+			lines: []string{strings.TrimPrefix(row, leftPad)},
+			hints: [][2]string{{"y", "Close"}, {"any key", "Cancel"}},
+		}, true
 	case modeError:
 		lines := strings.Split(lipgloss.Wrap(m.errMsg, innerW, ""), "\n")
 		if len(lines) > maxLines {
@@ -121,6 +138,16 @@ func (m model) dialog(innerW, maxLines int) (dialog, bool) {
 		}, true
 	}
 	return dialog{}, false
+}
+
+func (m model) windowCount(session string) int {
+	n := 0
+	for w := range m.ts.Windows {
+		if strings.HasPrefix(w, session+"/") {
+			n++
+		}
+	}
+	return n
 }
 
 // hintLines lays the key hints out on as few lines as fit innerW.

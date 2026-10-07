@@ -144,6 +144,11 @@ func hasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", exact(name)).Run() == nil
 }
 
+// KillWindow kills the named window in session.
+func KillWindow(session, window string) error {
+	return tmuxRun("kill-window", "-t", targetWindow(session, window))
+}
+
 func newSession(session, startDir, windowName string) error {
 	args := []string{"new-session", "-ds", session, "-c", startDir}
 	if windowName != "" {

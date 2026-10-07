@@ -23,6 +23,13 @@ type keyMap struct {
 	Projects key.Binding
 	Repos    key.Binding
 	Tmp      key.Binding
+
+	Close      key.Binding
+	PageUp     key.Binding
+	PageDown   key.Binding
+	NextFilter key.Binding
+	PrevFilter key.Binding
+	Open       key.Binding
 }
 
 // byName maps config keymap names to their bindings. Every keyMap field must
@@ -32,7 +39,9 @@ func (km *keyMap) byName() map[string]*key.Binding {
 		"up": &km.Up, "down": &km.Down, "enter": &km.Enter, "quit": &km.Quit,
 		"help": &km.Help, "clone": &km.Clone, "newtmp": &km.NewTmp,
 		"cleantmp": &km.CleanTmp, "all": &km.All, "projects": &km.Projects,
-		"repos": &km.Repos, "tmp": &km.Tmp,
+		"repos": &km.Repos, "tmp": &km.Tmp, "open": &km.Open,
+		"close": &km.Close, "pageup": &km.PageUp, "pagedown": &km.PageDown,
+		"nextfilter": &km.NextFilter, "prevfilter": &km.PrevFilter,
 	}
 }
 
@@ -50,10 +59,18 @@ func buildKeyMap(cfg config.Config) keyMap {
 		Clone:    key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl-g", "Clone repository")),
 		NewTmp:   key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl-n", "New tmp project")),
 		CleanTmp: key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl-x", "Delete tmp projects")),
-		All:      key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl-a", "Show all")),
-		Projects: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl-p", "Projects only")),
-		Repos:    key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl-r", "Repos only")),
-		Tmp:      key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl-t", "Tmp only")),
+		// Direct filter jumps have no default keys; tab cycles.
+		All:      key.NewBinding(key.WithHelp("", "Show all")),
+		Projects: key.NewBinding(key.WithHelp("", "Projects only")),
+		Repos:    key.NewBinding(key.WithHelp("", "Repos only")),
+		Tmp:      key.NewBinding(key.WithHelp("", "Tmp only")),
+		Open:     key.NewBinding(key.WithHelp("", "Open only")),
+
+		Close:      key.NewBinding(key.WithKeys("ctrl+q"), key.WithHelp("ctrl-q", "Close session")),
+		PageUp:     key.NewBinding(key.WithKeys("pgup", "ctrl+u"), key.WithHelp("pgup/ctrl-u", "Page up")),
+		PageDown:   key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn/ctrl-d", "Page down")),
+		NextFilter: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "Next filter")),
+		PrevFilter: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift-tab", "Previous filter")),
 	}
 
 	overrides := km.byName()
@@ -146,9 +163,15 @@ type helpGroup struct {
 }
 
 func buildHelpGroups(km keyMap) []helpGroup {
+	filters := []key.Binding{km.NextFilter, km.PrevFilter}
+	for _, b := range []key.Binding{km.All, km.Projects, km.Repos, km.Tmp, km.Open} {
+		if len(b.Keys()) > 0 {
+			filters = append(filters, b)
+		}
+	}
 	return []helpGroup{
-		{"Navigate", []key.Binding{km.Up, km.Down, km.Enter, km.Quit}},
-		{"Actions", []key.Binding{km.Clone, km.NewTmp, km.CleanTmp, km.Help}},
-		{"Filters", []key.Binding{km.All, km.Projects, km.Repos, km.Tmp}},
+		{"Navigate", []key.Binding{km.Up, km.Down, km.PageUp, km.PageDown, km.Enter, km.Quit}},
+		{"Actions", []key.Binding{km.Clone, km.NewTmp, km.CleanTmp, km.Close, km.Help}},
+		{"Filters", filters},
 	}
 }

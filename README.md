@@ -27,7 +27,7 @@ make install
 
 ```sh
 thop                   # open picker
-thop -s                # only show active sessions
+thop -s                # start in the Open filter (active sessions)
 thop ~/projects/myapp  # open a path directly, no picker
 thop clone <url>       # pick a destination and clone
 thop tmp               # create a new tmp project and open it
@@ -44,20 +44,22 @@ With an empty query the session you came from is listed first and the one you're
 | Key | Action |
 |-----|--------|
 | Type | Filter |
-| `↑` / `Ctrl-K` | Move up |
-| `↓` / `Ctrl-J` | Move down |
+| `↑` / `Ctrl-K` | Move up (wraps) |
+| `↓` / `Ctrl-J` | Move down (wraps) |
+| `PgUp` / `Ctrl-U` | Page up |
+| `PgDn` / `Ctrl-D` | Page down |
 | `Enter` | Open |
-| `Ctrl-A` | Show all |
-| `Ctrl-P` | Projects only |
-| `Ctrl-R` | Repos only |
-| `Ctrl-T` | Tmp only |
+| `Tab` / `Shift-Tab` | Next / previous filter |
+| `Ctrl-Q` | Close the highlighted session or window |
 | `Ctrl-G` | Clone a git repo |
 | `Ctrl-N` | New tmp project |
 | `Ctrl-X` | Delete tmp projects |
 | `?` | Toggle full keymap |
 | `Esc` / `Ctrl-C` | Quit |
 
-The status bar shows the active filter (`^A All · ^P Projects · ^R Repos · ^T Tmp`) and item count, and switches to mode-specific text during clone/tmp/clean flows.
+The status bar shows the filters (`All • Projects • Repos • Tmp • Open`) with the active one highlighted, and the cursor position (`3/120`). It switches to mode-specific text during clone/tmp/clean flows.
+
+`Ctrl-Q` asks before closing. On a project it kills the whole session, on a repo just its window.
 
 ### Tmp projects
 
@@ -108,10 +110,22 @@ Every keybinding can be remapped. Omit any entry to keep its default:
 #   clone: ["ctrl+g"]
 #   newtmp: ["ctrl+n"]
 #   cleantmp: ["ctrl+x"]
-#   all: ["ctrl+a"]
-#   projects: ["ctrl+p"]
-#   repos: ["ctrl+r"]
-#   tmp: ["ctrl+t"]
+#   close: ["ctrl+q"]
+#   pageup: ["pgup", "ctrl+u"]
+#   pagedown: ["pgdown", "ctrl+d"]
+#   nextfilter: ["tab"]
+#   prevfilter: ["shift+tab"]
+```
+
+Filters can also be bound to direct keys. These have no defaults:
+
+```yaml
+# keymap:
+#   all: ["alt+1"]
+#   projects: ["alt+2"]
+#   repos: ["alt+3"]
+#   tmp: ["alt+4"]
+#   open: ["alt+5"]
 ```
 
 Binding a plain character (like `k`) makes it untypeable in the search field, so stick to modifier keys for anything you'd also want to type. Binding the same key to two actions is rejected at startup.
@@ -130,7 +144,7 @@ Icons default to Nerd Font glyphs. Override any of them (use plain ASCII if your
 #   separator: "-" # horizontal rule rune
 ```
 
-Terminals send `ctrl+i`, `ctrl+m` and `ctrl+[` as `tab`, `enter` and `esc`, so thop binds both spellings: `clone: ["ctrl+i"]` also triggers on tab.
+Terminals send `ctrl+i`, `ctrl+m` and `ctrl+[` as `tab`, `enter` and `esc`, so thop binds both spellings: `clone: ["ctrl+i"]` also triggers on tab (and collides with the default `nextfilter`, so rebind that too).
 
 `alt+<key>`, `shift+<named key>` (like `shift+tab`) and function keys work everywhere. Combos like `ctrl+shift+x` need the enhanced keyboard protocol: a terminal that supports it (kitty, ghostty, WezTerm, recent iTerm2) and `set -s extended-keys on` in your tmux config. Without it the key degrades to plain `ctrl+x`. Modifiers must be spelled in the order `ctrl`, `alt`, `shift`, with a lowercase letter.
 

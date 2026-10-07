@@ -21,6 +21,7 @@ const (
 	viewProject
 	viewRepo
 	viewTmp
+	viewOpen
 )
 
 type inputMode int
@@ -33,6 +34,7 @@ const (
 	modeNameInput    // Ctrl-N: typing tmp name
 	modeCleanTmp     // Ctrl-X: search/select tmp projects
 	modeConfirmClean // y/N confirmation before delete
+	modeConfirmClose // y/N confirmation before killing a session or window
 	modeLoading
 	modeError
 )
@@ -103,26 +105,30 @@ type cleanFlow struct {
 	filtered []scoredItem // search-filtered view of tmp candidates
 	cursor   int
 	selected map[string]bool // AbsPath of selected tmp candidates
-	kill     func(session string) error
 }
 
 type model struct {
-	all        []baseItem
-	normFrec   map[string]float64
-	filtered   []scoredItem
-	tiQuery    textinput.Model // modeNormal search
-	cursor     int
-	view       viewMode
-	switchOnly bool
-	width      int
-	height     int
-	result     Result
-	ready      bool
-	inputMode  inputMode
+	all       []baseItem
+	normFrec  map[string]float64
+	filtered  []scoredItem
+	tiQuery   textinput.Model // modeNormal search
+	cursor    int
+	view      viewMode
+	width     int
+	height    int
+	result    Result
+	ready     bool
+	inputMode inputMode
 
 	clone cloneFlow
 	tmp   tmpFlow
 	clean cleanFlow
+
+	closeTarget baseItem
+	ts          tmux.State
+	killSession func(ts tmux.State, session string) error
+	killWindow  func(session, window string) error
+	loadState   func() tmux.State
 
 	tmpPath       string
 	showHelp      bool
@@ -180,7 +186,10 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 	m := model{
 		all:          all,
 		normFrec:     normalizeScores(scores),
-		switchOnly:   switchOnly,
+		ts:           ts,
+		killSession:  tmux.State.KillSession,
+		killWindow:   tmux.KillWindow,
+		loadState:    tmux.LoadState,
 		tmpPath:      cfg.TmpPath,
 		layoutBottom: cfg.Layout == "bottom",
 		keys:         buildKeyMap(cfg),
@@ -200,12 +209,23 @@ func newModel(cs []candidates.Candidate, scores map[string]float64, ts tmux.Stat
 		clean: cleanFlow{
 			tiQuery:  newTextInput("Search…"),
 			selected: make(map[string]bool),
-			kill:     ts.KillSession,
 		},
+	}
+	if switchOnly {
+		m.view = viewOpen
 	}
 	_ = m.tiQuery.Focus()
 	m.rebuildFiltered()
 	return m
+}
+
+// refreshTmux reloads tmux state after a kill so open/current labels and
+// ordering are right.
+func (m *model) refreshTmux() {
+	m.ts = m.loadState()
+	for i, item := range m.all {
+		m.all[i] = makeBaseItem(item.candidate, m.ts)
+	}
 }
 
 func makeBaseItem(c candidates.Candidate, ts tmux.State) baseItem {
@@ -228,13 +248,29 @@ func (m model) tmpItems() []baseItem {
 	return out
 }
 
-// moveCursor returns cur stepped by delta, clamped to [0, n).
+// moveCursor returns cur stepped by delta, wrapping at the ends of [0, n).
 func moveCursor(cur, delta, n int) int {
-	next := cur + delta
-	if next < 0 || next >= n {
-		return cur
+	if n == 0 {
+		return 0
 	}
-	return next
+	return ((cur+delta)%n + n) % n
+}
+
+func pageCursor(cur, delta, n int) int {
+	return max(0, min(n-1, cur+delta))
+}
+
+// maxRows is the list height: frame minus search, two separators and status.
+func (m model) maxRows() int {
+	height := m.height
+	if height == 0 {
+		height = 24
+	}
+	return max(5, height-4)
+}
+
+func (m model) pageStep(dir int) int {
+	return m.visualStep(dir) * m.maxRows()
 }
 
 // visualStep maps a visual direction (-1 up, +1 down) to an index delta.

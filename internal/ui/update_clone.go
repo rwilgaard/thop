@@ -62,6 +62,12 @@ func (m model) updateDestPicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Down):
 		m.clone.destCursor = moveCursor(m.clone.destCursor, m.visualStep(1), len(m.clone.destFiltered))
 		return m, nil
+	case key.Matches(msg, m.keys.PageUp):
+		m.clone.destCursor = pageCursor(m.clone.destCursor, m.pageStep(-1), len(m.clone.destFiltered))
+		return m, nil
+	case key.Matches(msg, m.keys.PageDown):
+		m.clone.destCursor = pageCursor(m.clone.destCursor, m.pageStep(1), len(m.clone.destFiltered))
+		return m, nil
 	default:
 		return m.forwardInput(msg)
 	}

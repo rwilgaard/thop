@@ -183,7 +183,7 @@ func TestRebuildFiltered(t *testing.T) {
 			{candidate: cand.Candidate{RelPath: "inactive-session", IsRepo: false}, active: false},
 		}
 		m := makeModel(items, map[string]float64{})
-		m.switchOnly = true
+		m.view = viewOpen
 		m.rebuildFiltered()
 
 		if len(m.filtered) != 1 {
@@ -200,7 +200,7 @@ func TestRebuildFiltered(t *testing.T) {
 			{candidate: cand.Candidate{RelPath: "proj-inactive", IsRepo: false}, active: false},
 		}
 		m := makeModel(items, map[string]float64{})
-		m.switchOnly = true
+		m.view = viewOpen
 		m.tiQuery.SetValue("proj")
 		m.rebuildFiltered()
 
@@ -246,7 +246,7 @@ func TestView(t *testing.T) {
 		{"● open", "active indicator"},
 		{"Filter", "status bar filter heading"},
 		{"All", "status bar active view"},
-		{"items", "item count"},
+		{"1/2", "cursor position"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(out, c.want) {
@@ -571,7 +571,7 @@ func TestHelpOverlay(t *testing.T) {
 	}
 
 	out := m.View().Content
-	for _, w := range []string{"Navigate", "Actions", "Filters", "Clone repository", "Move up", "Projects only"} {
+	for _, w := range []string{"Navigate", "Actions", "Filters", "Clone repository", "Move up", "Next filter", "Close session", "Page down"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("help overlay missing %q", w)
 		}
@@ -803,13 +803,21 @@ func TestStatusBar_modes(t *testing.T) {
 	// normal, wide: spelled+bracketed keys with dot separators, matching the
 	// other hint rows
 	out := m.View().Content
-	for _, w := range []string{"Filter", "<ctrl-a>", "All", "<ctrl-p>", "Projects", "<ctrl-r>", "Repos", "<ctrl-t>", "Tmp", "•", "0 items"} {
+	for _, w := range []string{"Filter", "All", "Projects", "Repos", "Tmp", "Open", "•", "0 items"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("wide normal status missing %q: %q", w, out)
 		}
 	}
+	if status := strings.Split(out, "\n")[m.maxRows()+3]; strings.Contains(status, "<") {
+		t.Errorf("unbound filter keys should not render: %q", status)
+	}
 
-	// normal, narrow: falls back to compact bare carets, no dots, so it fits
+	// bound direct-jump keys show up; narrow falls back to compact carets, no
+	// dots, so it fits
+	m.keys = buildKeyMap(config.Config{Keymap: map[string][]string{"all": {"ctrl+a"}}})
+	if wide := m.View().Content; !strings.Contains(wide, "<ctrl-a>") {
+		t.Errorf("bound filter key should render: %q", wide)
+	}
 	m.width = 60
 	narrow := m.View().Content
 	if !strings.Contains(narrow, "^A") || strings.Contains(narrow, "<ctrl-a>") || strings.Contains(narrow, "•") {
@@ -852,7 +860,7 @@ func TestStatusBar_modes(t *testing.T) {
 	m.rebuildCleanFiltered()
 	m.clean.selected = map[string]bool{"/t/a": true}
 	out = m.View().Content
-	if !strings.Contains(out, "1 selected") || !strings.Contains(out, "1 items") {
+	if !strings.Contains(out, "1 selected") || !strings.Contains(out, "1/1") {
 		t.Errorf("clean mode should show selection and count: %q", out)
 	}
 }
@@ -957,11 +965,11 @@ func TestLayoutBottom_visualCursor(t *testing.T) {
 	if m.cursor != 0 {
 		t.Errorf("bottom layout: down should return to index 0, got %d", m.cursor)
 	}
-	// clamp: down at index 0 (visual bottom) stays put
+	// down at index 0 (visual bottom) wraps to the far end
 	updated, _ = m.Update(down)
 	m = updated.(model)
-	if m.cursor != 0 {
-		t.Errorf("bottom layout: down at bottom should clamp, got %d", m.cursor)
+	if m.cursor != len(m.filtered)-1 {
+		t.Errorf("bottom layout: down at bottom should wrap to %d, got %d", len(m.filtered)-1, m.cursor)
 	}
 }
 
@@ -977,30 +985,22 @@ func TestTopLayout_cursor(t *testing.T) {
 	up := tea.KeyPressMsg{Code: tea.KeyUp}
 	down := tea.KeyPressMsg{Code: tea.KeyDown}
 
-	// top layout: best match (index 0) is visually at the top.
-	// Up at index 0 clamps (stays 0).
-	updated, _ := m.Update(up)
-	m = updated.(model)
-	if m.cursor != 0 {
-		t.Errorf("top layout: up from index 0 should clamp, got %d", m.cursor)
+	steps := []struct {
+		key  tea.KeyPressMsg
+		want int
+		desc string
+	}{
+		{up, 1, "up at the top wraps to the last row"},
+		{down, 0, "down at the last row wraps to the top"},
+		{down, 1, "down moves to index 1"},
+		{up, 0, "up returns to index 0"},
 	}
-	// Down moves to index 1.
-	updated, _ = m.Update(down)
-	m = updated.(model)
-	if m.cursor != 1 {
-		t.Errorf("top layout: down should reach index 1, got %d", m.cursor)
-	}
-	// Down at last index clamps (stays 1).
-	updated, _ = m.Update(down)
-	m = updated.(model)
-	if m.cursor != 1 {
-		t.Errorf("top layout: down at last index should clamp, got %d", m.cursor)
-	}
-	// Up returns to 0.
-	updated, _ = m.Update(up)
-	m = updated.(model)
-	if m.cursor != 0 {
-		t.Errorf("top layout: up should return to index 0, got %d", m.cursor)
+	for _, st := range steps {
+		updated, _ := m.Update(st.key)
+		m = updated.(model)
+		if m.cursor != st.want {
+			t.Errorf("%s: cursor = %d, want %d", st.desc, m.cursor, st.want)
+		}
 	}
 }
 
@@ -1135,10 +1135,11 @@ func TestCleanTmp_enterTargetsCursorRow(t *testing.T) {
 	}
 	m := newModel(nil, map[string]float64{}, tmux.State{}, false, config.Config{TmpPath: tmpDir}, false)
 	var killed []string
-	m.clean.kill = func(s string) error {
+	m.killSession = func(_ tmux.State, s string) error {
 		killed = append(killed, s)
 		return nil
 	}
+	m.loadState = func() tmux.State { return tmux.State{} }
 	m.all = all
 	m.rebuildCleanFiltered()
 	m.clean.cursor = 1
@@ -1238,6 +1239,7 @@ func TestDialog_backdrop(t *testing.T) {
 		{"tmp name over picker", modeNameInput, modeNormal, modeNormal},
 		{"clone name over dest picker", modeCloneName, modeNormal, modeDestPicker},
 		{"confirm over clean list", modeConfirmClean, modeNormal, modeCleanTmp},
+		{"close over picker", modeConfirmClose, modeNormal, modeNormal},
 		{"error over picker", modeError, modeNormal, modeNormal},
 		{"error from url input over picker", modeError, modeURLInput, modeNormal},
 		{"no dialog", modeDestPicker, modeNormal, modeDestPicker},
@@ -1257,5 +1259,169 @@ func TestDialog_backdrop(t *testing.T) {
 	m.inputMode = modeURLInput
 	if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "visible") {
 		t.Errorf("list should stay visible behind the dialog:\n%s", plain)
+	}
+}
+
+func TestPaging(t *testing.T) {
+	var cs []cand.Candidate
+	for i := range 30 {
+		name := fmt.Sprintf("p%02d", i)
+		cs = append(cs, cand.Candidate{AbsPath: "/p/" + name, RelPath: name})
+	}
+	pgup := tea.KeyPressMsg{Code: tea.KeyPgUp}
+	pgdn := tea.KeyPressMsg{Code: tea.KeyPgDown}
+	ctrlU := tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}
+	ctrlD := tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
+
+	tests := []struct {
+		name   string
+		layout string
+		keys   []tea.KeyPressMsg
+		want   int
+	}{
+		{"page down", "top", []tea.KeyPressMsg{pgdn}, 8},
+		{"page down clamps at end", "top", []tea.KeyPressMsg{pgdn, pgdn, pgdn, pgdn, pgdn}, 29},
+		{"page up clamps at start", "top", []tea.KeyPressMsg{pgdn, pgup, pgup}, 0},
+		{"ctrl+d pages down", "top", []tea.KeyPressMsg{ctrlD, ctrlD}, 16},
+		{"ctrl+u pages up", "top", []tea.KeyPressMsg{ctrlD, ctrlD, ctrlU}, 8},
+		{"bottom layout: page up moves away from the search bar", "bottom", []tea.KeyPressMsg{pgup}, 8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{Layout: tt.layout}, false)
+			m.width, m.height, m.ready = 80, 12, true // 8 list rows
+			for _, k := range tt.keys {
+				updated, _ := m.Update(k)
+				m = updated.(model)
+			}
+			if m.cursor != tt.want {
+				t.Errorf("cursor = %d, want %d", m.cursor, tt.want)
+			}
+		})
+	}
+
+	m := newModel(cs, map[string]float64{}, tmux.State{}, false, config.Config{}, false)
+	m.width, m.height, m.ready = 80, 12, true
+	updated, _ := m.Update(pgdn)
+	if out := updated.(model).View().Content; !strings.Contains(out, "9/30") {
+		t.Errorf("status should show position 9/30: %q", out)
+	}
+}
+
+func TestFilterCycle(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/proj", RelPath: "proj"},
+		{AbsPath: "/p/proj/repo", RelPath: "proj/repo", IsRepo: true},
+		{AbsPath: "/t/scratch", RelPath: "scratch", IsTmp: true},
+	}
+	ts := tmux.State{Sessions: map[string]bool{"scratch": true}}
+	m := newModel(cs, map[string]float64{}, ts, false, config.Config{}, false)
+
+	tab := tea.KeyPressMsg{Code: tea.KeyTab}
+	shiftTab := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	steps := []struct {
+		key   tea.KeyPressMsg
+		view  viewMode
+		count int
+	}{
+		{tab, viewProject, 1},
+		{tab, viewRepo, 1},
+		{tab, viewTmp, 1},
+		{tab, viewOpen, 1},
+		{tab, viewAll, 3},
+		{shiftTab, viewOpen, 1},
+		{shiftTab, viewTmp, 1},
+	}
+	for i, st := range steps {
+		updated, _ := m.Update(st.key)
+		m = updated.(model)
+		if m.view != st.view || len(m.filtered) != st.count {
+			t.Errorf("step %d: view = %v with %d rows, want %v with %d", i, m.view, len(m.filtered), st.view, st.count)
+		}
+	}
+
+	if got := newModel(cs, map[string]float64{}, ts, true, config.Config{}, false); got.view != viewOpen {
+		t.Errorf("-s should start in the open filter, got %v", got.view)
+	}
+}
+
+func TestClose(t *testing.T) {
+	cs := []cand.Candidate{
+		{AbsPath: "/p/group", RelPath: "group"},
+		{AbsPath: "/p/group/api", RelPath: "group/api", IsRepo: true},
+		{AbsPath: "/p/idle", RelPath: "idle"},
+	}
+	open := tmux.State{
+		Sessions: map[string]bool{"group": true},
+		Windows:  map[string]bool{"group/api": true, "group/web": true},
+	}
+	ctrlQ := tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl}
+	y := tea.KeyPressMsg{Text: "y", Code: 'y'}
+	n := tea.KeyPressMsg{Text: "n", Code: 'n'}
+
+	tests := []struct {
+		name        string
+		row         string
+		confirm     tea.KeyPressMsg
+		wantTitle   string
+		wantSession string
+		wantWindow  string
+	}{
+		{"session", "group", y, "Close session group (2 windows)?", "group", ""},
+		{"window", "group/api", y, "Close window group/api?", "group", "api"},
+		{"cancel", "group", n, "Close session group (2 windows)?", "", ""},
+		{"not open", "idle", y, "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(cs, map[string]float64{}, open, false, config.Config{}, false)
+			m.width, m.height, m.ready = 80, 24, true
+			var gotSession, gotWindow string
+			m.killSession = func(_ tmux.State, s string) error {
+				gotSession = s
+				return nil
+			}
+			m.killWindow = func(s, w string) error {
+				gotSession, gotWindow = s, w
+				return nil
+			}
+			m.loadState = func() tmux.State { return tmux.State{} }
+			for i, it := range m.filtered {
+				if it.base.candidate.RelPath == tt.row {
+					m.cursor = i
+				}
+			}
+
+			updated, _ := m.Update(ctrlQ)
+			m = updated.(model)
+			if tt.wantTitle == "" {
+				if m.inputMode != modeNormal {
+					t.Fatalf("close on a row that isn't open should do nothing, got mode %v", m.inputMode)
+				}
+				return
+			}
+			if m.inputMode != modeConfirmClose {
+				t.Fatalf("mode = %v, want modeConfirmClose", m.inputMode)
+			}
+			if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, tt.wantTitle) {
+				t.Errorf("missing %q in:\n%s", tt.wantTitle, plain)
+			}
+
+			updated, _ = m.Update(tt.confirm)
+			m = updated.(model)
+			if m.inputMode != modeNormal {
+				t.Errorf("mode after confirm = %v, want modeNormal", m.inputMode)
+			}
+			if gotSession != tt.wantSession || gotWindow != tt.wantWindow {
+				t.Errorf("killed %q/%q, want %q/%q", gotSession, gotWindow, tt.wantSession, tt.wantWindow)
+			}
+			if tt.wantSession != "" {
+				for _, it := range m.all {
+					if it.active {
+						t.Errorf("%s still marked open after state reload", it.candidate.RelPath)
+					}
+				}
+			}
+		})
 	}
 }
