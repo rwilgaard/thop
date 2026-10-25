@@ -2,7 +2,7 @@ BINARY  := thop
 INSTALL := /usr/local/bin/$(BINARY)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
-.PHONY: build run install uninstall fmt vet lint test clean release
+.PHONY: build run install uninstall fmt vet lint test clean release demo
 
 build:
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/thop
@@ -42,3 +42,6 @@ endif
 	git push origin main
 	git push origin v$(version)
 	@echo "Tagged v$(version) and pushed. GoReleaser will build and update nix-packages."
+
+demo:
+	vhs demo/demo.tape
