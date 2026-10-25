@@ -6,6 +6,8 @@ Fuzzy picker for tmux sessions. Scans your project directories, ranks results by
 
 Git repos nested inside a project open as windows in that project's session rather than their own top-level session.
 
+![thop demo](demo/demo.gif)
+
 ## Requirements
 
 - Go 1.26+
