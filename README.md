@@ -16,6 +16,12 @@ Git repos nested inside a project open as windows in that project's session rath
 ## Installation
 
 ```sh
+brew install rwilgaard/tap/thop
+```
+
+Or with Go:
+
+```sh
 go install github.com/rwilgaard/thop/cmd/thop@latest
 ```
 

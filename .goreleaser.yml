@@ -39,6 +39,25 @@ nix:
       branch: main
       token: "{{ .Env.NIX_PACKAGES_TOKEN }}"
 
+homebrew_casks:
+  - name: thop
+    ids: [thop]
+    binaries: [thop]
+    homepage: "https://github.com/rwilgaard/thop"
+    description: "Fuzzy tmux session manager with frecency ranking"
+    license: "MIT"
+    hooks:
+      pre:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/thop"]
+          end
+    repository:
+      owner: rwilgaard
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+
 changelog:
   sort: asc
   filters:
